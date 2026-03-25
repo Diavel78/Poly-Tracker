@@ -673,7 +673,8 @@
             statusEl.innerHTML = '<span class="spinner"></span> Fetching data...';
 
             try {
-                const resp = await fetch('/api/data');
+                const tz = new Date().getTimezoneOffset();
+                const resp = await fetch('/api/data?tz=' + tz);
                 if (resp.status === 401 || resp.status === 302) {
                     window.location.href = '/login';
                     return;

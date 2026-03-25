@@ -249,8 +249,12 @@ def enrich_positions(client, positions):
     return enriched
 
 
-def compute_summary(enriched, parsed_activities):
-    """Compute summary stats from open positions + resolved activity P&L."""
+def compute_summary(enriched, parsed_activities, tz_offset_minutes=0):
+    """Compute summary stats from open positions + resolved activity P&L.
+
+    tz_offset_minutes: client's timezone offset from UTC in minutes
+    (e.g., MST = -420, EST = -300). Matches JS getTimezoneOffset().
+    """
     total_invested = 0.0
     total_current = 0.0
     open_pnl = 0.0
@@ -270,9 +274,13 @@ def compute_summary(enriched, parsed_activities):
     today_pnl = 0.0
     yesterday_pnl = 0.0
 
-    now_utc = datetime.now(timezone.utc)
-    today_str = now_utc.strftime("%Y-%m-%d")
-    yesterday_str = (now_utc - timedelta(days=1)).strftime("%Y-%m-%d")
+    # Use client's timezone for today/yesterday boundaries
+    # JS getTimezoneOffset() returns minutes AHEAD of UTC (MST = 420),
+    # so we subtract to get local time
+    client_tz = timezone(timedelta(minutes=-tz_offset_minutes))
+    now_local = datetime.now(client_tz)
+    today_str = now_local.strftime("%Y-%m-%d")
+    yesterday_str = (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
 
     for act in parsed_activities:
         if act["type"] == "Position Resolution" and act["pnl"] is not None:
@@ -281,10 +289,22 @@ def compute_summary(enriched, parsed_activities):
             if act["pnl"] > 0:
                 resolved_wins += 1
 
+            # Convert activity timestamp to client's local date for comparison
             ts = act.get("timestamp", "")
-            if ts.startswith(today_str):
+            if ts:
+                try:
+                    act_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    if act_dt.tzinfo is None:
+                        act_dt = act_dt.replace(tzinfo=timezone.utc)
+                    act_local = act_dt.astimezone(client_tz).strftime("%Y-%m-%d")
+                except (ValueError, TypeError):
+                    act_local = ts[:10]
+            else:
+                act_local = ""
+
+            if act_local == today_str:
                 today_pnl += act["pnl"]
-            elif ts.startswith(yesterday_str):
+            elif act_local == yesterday_str:
                 yesterday_pnl += act["pnl"]
 
     total_pnl = open_pnl + realized_pnl
@@ -569,7 +589,8 @@ def api_data():
     open_positions = [p for p in enriched if not p.get("expired")]
     closed_positions = [a for a in parsed_acts if a["type"] == "Position Resolution"]
 
-    summary = compute_summary(enriched, parsed_acts)
+    tz_offset = request.args.get("tz", 0, type=int)
+    summary = compute_summary(enriched, parsed_acts, tz_offset_minutes=tz_offset)
 
     return jsonify({
         "ok": True,
