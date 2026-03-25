@@ -482,6 +482,33 @@ def api_raw():
     return jsonify(raw)
 
 
+@app.route("/api/debug-markets")
+@login_required
+def api_debug_markets():
+    """Debug: show raw market detail for each open position."""
+    try:
+        client = get_client()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    try:
+        positions_resp = client.portfolio.positions()
+    except Exception as e:
+        return jsonify({"error": f"positions: {e}"}), 500
+
+    results = []
+    for slug, pos in positions_resp.items():
+        metadata = pos.get("marketMetadata", {})
+        market_slug = metadata.get("slug") or slug
+        market_detail = fetch_market(client, market_slug)
+        results.append({
+            "slug": slug,
+            "marketMetadata": metadata,
+            "marketDetail": market_detail,
+        })
+    return jsonify(results)
+
+
 @app.route("/api/data")
 @login_required
 def api_data():
