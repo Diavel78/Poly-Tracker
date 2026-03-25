@@ -521,7 +521,7 @@
                 return;
             }
             let html = '<table><thead><tr>' +
-                '<th>Market</th><th>Side</th>' +
+                '<th>Market</th>' +
                 '<th class="right">Qty</th><th class="right">Entry</th>' +
                 '<th class="right">Current</th><th class="right">P&L</th>' +
                 '<th class="right">Return</th></tr></thead><tbody>';
@@ -529,7 +529,6 @@
             for (const p of positions) {
                 html += `<tr>
                     <td>${esc(p.market_name.replace(/\s+\d{4}-\d{2}-\d{2}$/, ''))}${p.outcome ? ' — ' + esc(p.outcome) : ''}</td>
-                    <td>${sideTag(p.side)}</td>
                     <td class="right">${p.quantity.toFixed(0)}</td>
                     <td class="right">${p.entry_price !== null ? amt(p.entry_price, '$') : '--'}</td>
                     <td class="right">${p.current_price !== null ? amt(p.current_price, '$') : '--'}</td>
@@ -619,34 +618,12 @@
 
         function buildBetSlipLabel(p) {
             const title = (p.market_name || '').replace(/\s+\d{4}-\d{2}-\d{2}$/, ''); // strip trailing date
-            const outcome = p.outcome || '';
-            const side = p.side;
+            const pick = p.outcome || '';
 
-            let event = title;
-            let pick = outcome || title;
-
-            // For NO bets on head-to-head (vs.) markets, show the opponent
-            if (side === 'NO' && outcome) {
-                const vsMatch = title.match(/^(.+?)\s+vs\.?\s+(.+?)(?:\s+\d{4}-\d{2}-\d{2})?$/i);
-                if (vsMatch) {
-                    const playerA = vsMatch[1].trim();
-                    const playerB = vsMatch[2].trim();
-                    // If outcome matches one player, pick is the other
-                    if (outcome.trim() === playerA) {
-                        pick = playerB;
-                    } else if (outcome.trim() === playerB) {
-                        pick = playerA;
-                    }
-                    event = playerA + ' vs. ' + playerB;
-                }
+            if (!pick || pick === title) {
+                return title;
             }
-
-            // If pick equals the event name (no separate outcome), just show the event
-            if (pick === event) {
-                return { display: event, hasLine: false };
-            }
-
-            return { display: event + ' — ' + pick, hasLine: false };
+            return title + ' — ' + pick;
         }
 
         function openBetSlip() {
