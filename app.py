@@ -490,6 +490,10 @@ def api_data():
 
     parsed_acts = parse_activities(client, activities)
 
+    # Exclude activity before 2026-03-01 (prior data was arb trading, not legit bets)
+    CUTOFF_DATE = "2026-03-01"
+    parsed_acts = [a for a in parsed_acts if a.get("timestamp", "") >= CUTOFF_DATE]
+
     # Separate open vs closed positions
     open_positions = [p for p in enriched if not p.get("expired")]
     closed_positions = [a for a in parsed_acts if a["type"] == "Position Resolution"]

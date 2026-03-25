@@ -201,11 +201,17 @@
 
         /* --- Responsive --- */
         @media (max-width: 768px) {
-            .container { padding: 12px; }
-            .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-            td, th { padding: 8px 10px; font-size: 13px; }
-            .card .value { font-size: 18px; }
-            .card { padding: 14px; }
+            .container { padding: 8px; }
+            .navbar { padding: 10px 12px; }
+            .navbar h1 { font-size: 16px; }
+            .cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+            .card { padding: 12px; }
+            .card .label { font-size: 10px; }
+            .card .value { font-size: 17px; }
+            .section { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            table { min-width: 500px; }
+            td, th { padding: 8px 8px; font-size: 12px; white-space: nowrap; }
+            .tab { padding: 8px 12px; font-size: 13px; }
         }
     </style>
 </head>
