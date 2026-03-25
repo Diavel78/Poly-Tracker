@@ -9,7 +9,7 @@ import os
 import sys
 import secrets
 import functools
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 from flask import (
@@ -120,13 +120,24 @@ def fetch_market(client, slug_or_id):
             return None
 
 
-def fetch_activities(client):
+def fetch_activities(client, max_pages=20):
+    """Fetch all activities using cursor-based pagination."""
+    all_activities = []
+    cursor = None
     try:
-        response = client.portfolio.activities()
-        return response.get("activities", [])
+        for _ in range(max_pages):
+            params = {"limit": 100}
+            if cursor:
+                params["cursor"] = cursor
+            response = client.portfolio.activities(params=params)
+            activities = response.get("activities", [])
+            all_activities.extend(activities)
+            if response.get("eof", True) or not response.get("nextCursor"):
+                break
+            cursor = response.get("nextCursor")
     except Exception as e:
         print(f"ERROR fetching activities: {e}")
-        return []
+    return all_activities
 
 
 def fetch_balances(client):
@@ -198,12 +209,11 @@ def enrich_positions(client, positions):
     return enriched
 
 
-def compute_summary(enriched):
+def compute_summary(enriched, parsed_activities):
+    """Compute summary stats from open positions + resolved activity P&L."""
     total_invested = 0.0
     total_current = 0.0
-    total_pnl = 0.0
-    resolved_wins = 0
-    resolved_total = 0
+    open_pnl = 0.0
 
     for p in enriched:
         if p["entry_price"] is not None and p["quantity"]:
@@ -211,18 +221,44 @@ def compute_summary(enriched):
         if p["current_value"] is not None:
             total_current += p["current_value"]
         if p["pnl"] is not None:
-            total_pnl += p["pnl"]
-            if p.get("expired"):
-                resolved_total += 1
-                if p["pnl"] > 0:
-                    resolved_wins += 1
+            open_pnl += p["pnl"]
 
+    # Compute realized P&L from resolved positions in activity history
+    realized_pnl = 0.0
+    resolved_wins = 0
+    resolved_total = 0
+    today_pnl = 0.0
+    yesterday_pnl = 0.0
+
+    now_utc = datetime.now(timezone.utc)
+    today_str = now_utc.strftime("%Y-%m-%d")
+    yesterday_str = (now_utc - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    for act in parsed_activities:
+        if act["type"] == "Position Resolution" and act["pnl"] is not None:
+            realized_pnl += act["pnl"]
+            resolved_total += 1
+            if act["pnl"] > 0:
+                resolved_wins += 1
+
+            ts = act.get("timestamp", "")
+            if ts.startswith(today_str):
+                today_pnl += act["pnl"]
+            elif ts.startswith(yesterday_str):
+                yesterday_pnl += act["pnl"]
+
+    total_pnl = open_pnl + realized_pnl
     win_rate = (resolved_wins / resolved_total * 100) if resolved_total > 0 else None
+
     return {
-        "total_positions": len(enriched),
+        "total_positions": len([p for p in enriched if not p.get("expired")]),
         "total_invested": total_invested,
         "total_current": total_current,
         "total_pnl": total_pnl,
+        "open_pnl": open_pnl,
+        "realized_pnl": realized_pnl,
+        "today_pnl": today_pnl,
+        "yesterday_pnl": yesterday_pnl,
         "resolved_total": resolved_total,
         "resolved_wins": resolved_wins,
         "win_rate": win_rate,
@@ -319,9 +355,23 @@ def parse_activities(client, activities):
             if cost is not None and quantity > 0:
                 price = cost / quantity
 
-            realized = _safe_float(after.get("realized"))
-            if realized is not None:
-                pnl = realized
+            # Compute P&L: use difference in realized between before/after,
+            # or fall back to computing from position direction and cost
+            before_realized = _safe_float(before.get("realized")) or 0
+            after_realized = _safe_float(after.get("realized")) or 0
+            pnl_diff = after_realized - before_realized
+            if abs(pnl_diff) > 0.001:
+                pnl = pnl_diff
+            elif cost is not None:
+                # Determine if position won: YES position wins if side=YES,
+                # NO position (negative netPosition) wins if side=NO
+                net = _safe_float(before.get("netPosition")) or 0
+                held_yes = net > 0
+                won = (held_yes and side == "YES") or (not held_yes and side == "NO")
+                if won:
+                    pnl = quantity - cost  # payout is $1 * qty
+                else:
+                    pnl = -cost  # total loss
 
         elif act_type == "ACTIVITY_TYPE_ACCOUNT_BALANCE_CHANGE":
             amount = _safe_float(detail.get("amount"))
@@ -438,13 +488,20 @@ def api_data():
     except Exception as e:
         errors.append(f"balances: {e}")
 
-    summary = compute_summary(enriched)
+    parsed_acts = parse_activities(client, activities)
+
+    # Separate open vs closed positions
+    open_positions = [p for p in enriched if not p.get("expired")]
+    closed_positions = [a for a in parsed_acts if a["type"] == "Position Resolution"]
+
+    summary = compute_summary(enriched, parsed_acts)
 
     return jsonify({
         "ok": True,
         "timestamp": now.isoformat(),
-        "positions": enriched,
-        "activities": parse_activities(client, activities),
+        "positions": open_positions,
+        "closed_positions": closed_positions,
+        "activities": parsed_acts,
         "balances": parse_balances(balances),
         "summary": summary,
         "errors": errors,
