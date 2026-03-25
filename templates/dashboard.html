@@ -44,6 +44,21 @@
         .btn-sm:hover { background: #30363d; }
         .btn-refresh { background: #1f6feb; color: #fff; border-color: #1f6feb; }
         .btn-refresh:hover { background: #388bfd; }
+        .btn-hide { font-size: 16px; min-width: 36px; text-align: center; }
+        .btn-hide.active { background: #30363d; }
+
+        /* --- Hide amounts mode --- */
+        body.hide-amounts .amt { visibility: hidden; position: relative; }
+        body.hide-amounts .amt::after {
+            content: '***';
+            visibility: visible;
+            position: absolute;
+            left: 0;
+            right: 0;
+        }
+        body.hide-amounts .card .amt::after { position: static; }
+        body.hide-amounts .card .amt { font-size: inherit; }
+        body.hide-amounts td.right .amt::after { text-align: right; }
 
         /* --- Layout --- */
         .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
@@ -199,6 +214,7 @@
         <h1>Poly-Tracker</h1>
         <div class="navbar-right">
             <span class="status" id="status">Loading...</span>
+            <button class="btn-sm btn-hide" id="btn-hide" onclick="toggleAmounts()" title="Hide/show dollar amounts">&#x1F441;</button>
             <button class="btn-sm btn-refresh" onclick="loadData()">Refresh</button>
             <a href="/logout" class="btn-sm">Logout</a>
         </div>
@@ -281,10 +297,30 @@
     <script>
         const $ = id => document.getElementById(id);
 
-        function fmt(val, prefix) {
+        let amountsHidden = localStorage.getItem('hideAmounts') === '1';
+
+        function toggleAmounts() {
+            amountsHidden = !amountsHidden;
+            localStorage.setItem('hideAmounts', amountsHidden ? '1' : '0');
+            document.body.classList.toggle('hide-amounts', amountsHidden);
+            $('btn-hide').classList.toggle('active', amountsHidden);
+        }
+
+        // Apply on load
+        if (amountsHidden) {
+            document.body.classList.add('hide-amounts');
+            $('btn-hide').classList.add('active');
+        }
+
+        function fmtRaw(val, prefix) {
             if (val === null || val === undefined) return '--';
             prefix = prefix || '';
             return prefix + val.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+
+        function amt(val, prefix) {
+            if (val === null || val === undefined) return '--';
+            return `<span class="amt">${fmtRaw(val, prefix)}</span>`;
         }
 
         function pnlClass(val) {
@@ -292,10 +328,10 @@
             return val >= 0 ? 'positive' : 'negative';
         }
 
-        function pnlFmt(val) {
+        function pnlAmt(val) {
             if (val === null || val === undefined) return '--';
             const sign = val >= 0 ? '+' : '';
-            return sign + fmt(val, '$');
+            return `<span class="amt">${sign}${fmtRaw(val, '$')}</span>`;
         }
 
         function sideTag(side) {
@@ -313,20 +349,20 @@
             const s = data.summary;
             const b = data.balances;
 
-            $('card-balance').textContent = b.current_balance !== null ? fmt(b.current_balance, '$') : '--';
+            $('card-balance').innerHTML = b.current_balance !== null ? amt(b.current_balance, '$') : '--';
             $('card-positions').textContent = s.total_positions;
-            $('card-value').textContent = fmt(s.total_current, '$');
+            $('card-value').innerHTML = amt(s.total_current, '$');
 
             const todayEl = $('card-today-pnl');
-            todayEl.textContent = pnlFmt(s.today_pnl);
+            todayEl.innerHTML = pnlAmt(s.today_pnl);
             todayEl.className = 'value ' + pnlClass(s.today_pnl);
 
             const yesterdayEl = $('card-yesterday-pnl');
-            yesterdayEl.textContent = pnlFmt(s.yesterday_pnl);
+            yesterdayEl.innerHTML = pnlAmt(s.yesterday_pnl);
             yesterdayEl.className = 'value ' + pnlClass(s.yesterday_pnl);
 
             const pnlEl = $('card-pnl');
-            pnlEl.textContent = pnlFmt(s.total_pnl);
+            pnlEl.innerHTML = pnlAmt(s.total_pnl);
             pnlEl.className = 'value ' + pnlClass(s.total_pnl);
 
             $('card-winrate').textContent = s.win_rate !== null
@@ -352,9 +388,9 @@
                     <td>${esc(p.market_name)}</td>
                     <td>${sideTag(p.side)}</td>
                     <td class="right">${p.quantity.toFixed(0)}</td>
-                    <td class="right">${p.entry_price !== null ? fmt(p.entry_price, '$') : '--'}</td>
-                    <td class="right">${p.current_price !== null ? fmt(p.current_price, '$') : '--'}</td>
-                    <td class="right ${pnlClass(p.pnl)}">${pnlFmt(p.pnl)}</td>
+                    <td class="right">${p.entry_price !== null ? amt(p.entry_price, '$') : '--'}</td>
+                    <td class="right">${p.current_price !== null ? amt(p.current_price, '$') : '--'}</td>
+                    <td class="right ${pnlClass(p.pnl)}">${pnlAmt(p.pnl)}</td>
                     <td class="right ${pnlClass(p.pnl_pct)}">${p.pnl_pct !== null ? ((p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(1) + '%') : '--'}</td>
                 </tr>`;
             }
@@ -379,8 +415,8 @@
                     <td>${esc(c.timestamp)}</td>
                     <td>${esc(c.market)}</td>
                     <td class="right">${c.quantity !== null ? c.quantity.toFixed(0) : '--'}</td>
-                    <td class="right">${c.price !== null ? fmt(c.price, '$') : '--'}</td>
-                    <td class="right ${pnlClass(c.pnl)}">${pnlFmt(c.pnl)}</td>
+                    <td class="right">${c.price !== null ? amt(c.price, '$') : '--'}</td>
+                    <td class="right ${pnlClass(c.pnl)}">${pnlAmt(c.pnl)}</td>
                 </tr>`;
             }
             html += '</tbody></table>';
@@ -405,8 +441,8 @@
                     <td>${esc(a.timestamp)}</td>
                     <td>${esc(a.market)}</td>
                     <td class="right">${a.quantity !== null ? a.quantity.toFixed(0) : '--'}</td>
-                    <td class="right">${a.price !== null ? fmt(a.price, '$') : '--'}</td>
-                    <td class="right ${pnlClass(a.pnl)}">${pnlFmt(a.pnl)}</td>
+                    <td class="right">${a.price !== null ? amt(a.price, '$') : '--'}</td>
+                    <td class="right ${pnlClass(a.pnl)}">${pnlAmt(a.pnl)}</td>
                     <td>${esc(a.type)}</td>
                 </tr>`;
             }
