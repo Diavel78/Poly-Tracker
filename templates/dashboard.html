@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poly-Tracker Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+        }
+
+        /* --- Navbar --- */
+        .navbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 24px;
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+        }
+        .navbar h1 { font-size: 18px; color: #e6edf3; }
+        .navbar-right { display: flex; align-items: center; gap: 16px; }
+        .navbar .status {
+            font-size: 12px;
+            color: #8b949e;
+        }
+        .navbar .status.loading { color: #d29922; }
+        .navbar .status.error { color: #f85149; }
+        .btn-sm {
+            padding: 6px 14px;
+            background: #21262d;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .btn-sm:hover { background: #30363d; }
+        .btn-refresh { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+        .btn-refresh:hover { background: #388bfd; }
+
+        /* --- Layout --- */
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+        /* --- Summary cards --- */
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .card .label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #8b949e;
+            margin-bottom: 6px;
+        }
+        .card .value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #e6edf3;
+        }
+        .card .value.positive { color: #3fb950; }
+        .card .value.negative { color: #f85149; }
+
+        /* --- Tables --- */
+        .section {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+        .section-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #30363d;
+            font-weight: 600;
+            font-size: 15px;
+            color: #e6edf3;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            text-align: left;
+            padding: 10px 16px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #8b949e;
+            border-bottom: 1px solid #30363d;
+            background: #0d1117;
+        }
+        th.right, td.right { text-align: right; }
+        td {
+            padding: 12px 16px;
+            font-size: 14px;
+            border-bottom: 1px solid #21262d;
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #1c2128; }
+        .positive { color: #3fb950; }
+        .negative { color: #f85149; }
+        .side-yes {
+            background: #0e4429;
+            color: #3fb950;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .side-no {
+            background: #3d1f1f;
+            color: #f85149;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .empty-state {
+            padding: 40px;
+            text-align: center;
+            color: #8b949e;
+            font-size: 14px;
+        }
+
+        /* --- Spinner --- */
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #30363d;
+            border-top-color: #58a6ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* --- Responsive --- */
+        @media (max-width: 768px) {
+            .container { padding: 12px; }
+            .cards { grid-template-columns: repeat(2, 1fr); }
+            td, th { padding: 8px 10px; font-size: 13px; }
+            .card .value { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Poly-Tracker</h1>
+        <div class="navbar-right">
+            <span class="status" id="status">Loading...</span>
+            <button class="btn-sm btn-refresh" onclick="loadData()">Refresh</button>
+            <a href="/logout" class="btn-sm">Logout</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Summary cards -->
+        <div class="cards" id="cards">
+            <div class="card">
+                <div class="label">Balance</div>
+                <div class="value" id="card-balance">--</div>
+            </div>
+            <div class="card">
+                <div class="label">Positions</div>
+                <div class="value" id="card-positions">--</div>
+            </div>
+            <div class="card">
+                <div class="label">Portfolio Value</div>
+                <div class="value" id="card-value">--</div>
+            </div>
+            <div class="card">
+                <div class="label">Total P&L</div>
+                <div class="value" id="card-pnl">--</div>
+            </div>
+            <div class="card">
+                <div class="label">Win Rate</div>
+                <div class="value" id="card-winrate">--</div>
+            </div>
+        </div>
+
+        <!-- Positions table -->
+        <div class="section">
+            <div class="section-header">Open Positions</div>
+            <div id="positions-body">
+                <div class="empty-state"><span class="spinner"></span> Loading positions...</div>
+            </div>
+        </div>
+
+        <!-- Trade history -->
+        <div class="section">
+            <div class="section-header">Recent Activity</div>
+            <div id="activities-body">
+                <div class="empty-state"><span class="spinner"></span> Loading activity...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        function fmt(val, prefix) {
+            if (val === null || val === undefined) return '--';
+            prefix = prefix || '';
+            return prefix + val.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+
+        function pnlClass(val) {
+            if (val === null || val === undefined) return '';
+            return val >= 0 ? 'positive' : 'negative';
+        }
+
+        function sideTag(side) {
+            const cls = side === 'YES' ? 'side-yes' : 'side-no';
+            return `<span class="${cls}">${side}</span>`;
+        }
+
+        function renderCards(data) {
+            const s = data.summary;
+            const b = data.balances;
+
+            $('card-balance').textContent = b.current_balance !== null ? fmt(b.current_balance, '$') : '--';
+            $('card-positions').textContent = s.total_positions;
+
+            $('card-value').textContent = fmt(s.total_current, '$');
+
+            const pnlEl = $('card-pnl');
+            const sign = s.total_pnl >= 0 ? '+' : '';
+            pnlEl.textContent = sign + fmt(s.total_pnl, '$');
+            pnlEl.className = 'value ' + pnlClass(s.total_pnl);
+
+            $('card-winrate').textContent = s.win_rate !== null
+                ? s.win_rate.toFixed(1) + '%'
+                : (s.resolved_total === 0 ? 'N/A' : '--');
+        }
+
+        function renderPositions(positions) {
+            const el = $('positions-body');
+            if (!positions.length) {
+                el.innerHTML = '<div class="empty-state">No open positions</div>';
+                return;
+            }
+            let html = '<table><thead><tr>' +
+                '<th>Market</th><th>Side</th>' +
+                '<th class="right">Qty</th><th class="right">Entry</th>' +
+                '<th class="right">Current</th><th class="right">P&L</th>' +
+                '<th class="right">Return</th></tr></thead><tbody>';
+
+            for (const p of positions) {
+                const pnl = p.pnl !== null ? ((p.pnl >= 0 ? '+' : '') + fmt(p.pnl, '$')) : '--';
+                const ret = p.pnl_pct !== null ? ((p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(1) + '%') : '--';
+                html += `<tr>
+                    <td>${esc(p.market_name)}</td>
+                    <td>${sideTag(p.side)}</td>
+                    <td class="right">${p.quantity.toFixed(0)}</td>
+                    <td class="right">${p.entry_price !== null ? fmt(p.entry_price, '$') : '--'}</td>
+                    <td class="right">${p.current_price !== null ? fmt(p.current_price, '$') : '--'}</td>
+                    <td class="right ${pnlClass(p.pnl)}">${pnl}</td>
+                    <td class="right ${pnlClass(p.pnl_pct)}">${ret}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            el.innerHTML = html;
+        }
+
+        function renderActivities(activities) {
+            const el = $('activities-body');
+            if (!activities.length) {
+                el.innerHTML = '<div class="empty-state">No recent activity</div>';
+                return;
+            }
+            let html = '<table><thead><tr>' +
+                '<th>Time</th><th>Market</th><th>Side</th>' +
+                '<th class="right">Price</th><th class="right">Qty</th>' +
+                '<th>Type</th></tr></thead><tbody>';
+
+            for (const a of activities) {
+                html += `<tr>
+                    <td>${esc(a.timestamp)}</td>
+                    <td>${esc(a.market)}</td>
+                    <td>${a.side ? sideTag(a.side.toUpperCase()) : '--'}</td>
+                    <td class="right">${a.price !== null ? fmt(a.price, '$') : '--'}</td>
+                    <td class="right">${a.quantity !== null ? a.quantity.toFixed(0) : '--'}</td>
+                    <td>${esc(a.type)}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            el.innerHTML = html;
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        async function loadData() {
+            const statusEl = $('status');
+            statusEl.className = 'status loading';
+            statusEl.innerHTML = '<span class="spinner"></span> Fetching data...';
+
+            try {
+                const resp = await fetch('/api/data');
+                if (resp.status === 401 || resp.status === 302) {
+                    window.location.href = '/login';
+                    return;
+                }
+                const data = await resp.json();
+                if (!data.ok) throw new Error(data.error || 'API error');
+
+                renderCards(data);
+                renderPositions(data.positions);
+                renderActivities(data.activities);
+
+                const ts = new Date(data.timestamp);
+                statusEl.className = 'status';
+                statusEl.textContent = 'Updated ' + ts.toLocaleTimeString();
+            } catch (err) {
+                statusEl.className = 'status error';
+                statusEl.textContent = 'Error: ' + err.message;
+            }
+        }
+
+        // Load on page load, auto-refresh every 60s
+        loadData();
+        setInterval(loadData, 60000);
+    </script>
+</body>
+</html>
