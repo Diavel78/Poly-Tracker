@@ -159,6 +159,7 @@ def enrich_positions(client, positions):
         metadata = pos.get("marketMetadata", {})
         market_name = metadata.get("title") or metadata.get("question") or slug
         market_slug = metadata.get("slug") or slug
+        outcome = metadata.get("outcome") or ""
 
         net_position = _safe_float(pos.get("netPosition")) or 0
         quantity = abs(net_position)
@@ -196,6 +197,7 @@ def enrich_positions(client, positions):
         enriched.append({
             "market_name": market_name,
             "market_slug": market_slug,
+            "outcome": outcome,
             "side": side,
             "quantity": quantity,
             "entry_price": entry_price,
