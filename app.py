@@ -164,17 +164,26 @@ def enrich_positions(client, positions):
         team = metadata.get("team") or {}
         team_name = team.get("name", "") if isinstance(team, dict) else ""
 
-        # Derive meaningful pick label:
-        # 1. Use team name if available (e.g., "Duke")
-        # 2. If outcome is not just Yes/No, use it (e.g., "Over 220.5", "Lakers -3.5")
-        # 3. Try to derive from slug by removing event slug prefix
-        # 4. Fall back to empty
-        if team_name:
+        # Fetch full market detail to get the contract-level title (includes line info)
+        # e.g., "BUF Sabres -1.5" or "Over 6.5" instead of just "Sabres" or "Over"
+        market_detail = fetch_market(client, market_slug)
+        contract_title = ""
+        if market_detail:
+            md = market_detail.get("market", market_detail) if isinstance(market_detail, dict) else {}
+            contract_title = md.get("title", "")
+
+        # Derive meaningful pick label with line info:
+        # 1. Use contract title from full market detail (e.g., "BUF Sabres -1.5", "Over 6.5")
+        # 2. Fall back to team name (e.g., "Purdue Boilermakers")
+        # 3. If outcome is not just Yes/No, use it
+        # 4. Try to derive from slug
+        if contract_title and contract_title != market_name:
+            outcome = contract_title
+        elif team_name:
             outcome = team_name
         elif raw_outcome.lower() not in ("yes", "no", ""):
             outcome = raw_outcome
         elif event_slug and market_slug.startswith(event_slug + "-"):
-            # e.g., slug "aec-ncaa-winner-duke" minus eventSlug "aec-ncaa-winner" = "duke"
             suffix = market_slug[len(event_slug) + 1:]
             outcome = suffix.replace("-", " ").title()
         else:
