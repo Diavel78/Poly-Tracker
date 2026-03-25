@@ -241,18 +241,69 @@ def parse_balances(balances):
     }
 
 
+def _activity_type_label(raw_type):
+    """Convert ACTIVITY_TYPE_POSITION_RESOLUTION -> Resolution, etc."""
+    label = raw_type.replace("ACTIVITY_TYPE_", "").replace("_", " ").title()
+    return label or raw_type
+
+
 def parse_activities(activities):
-    """Convert activity dicts for the template."""
+    """Convert activity dicts for the template.
+
+    Activity types and their detail keys:
+      ACTIVITY_TYPE_POSITION_RESOLUTION -> positionResolution
+      ACTIVITY_TYPE_TRADE -> trade
+      ACTIVITY_TYPE_ACCOUNT_BALANCE_CHANGE -> accountBalanceChange
+    """
+    # Map type enum to the detail key in the activity dict
+    TYPE_KEY_MAP = {
+        "ACTIVITY_TYPE_POSITION_RESOLUTION": "positionResolution",
+        "ACTIVITY_TYPE_TRADE": "trade",
+        "ACTIVITY_TYPE_ACCOUNT_BALANCE_CHANGE": "accountBalanceChange",
+    }
+
     parsed = []
     for act in activities:
         act_type = act.get("type", "unknown")
-        detail = act.get(act_type, {}) if isinstance(act.get(act_type), dict) else {}
+        detail_key = TYPE_KEY_MAP.get(act_type, "")
+        detail = act.get(detail_key, {}) if detail_key else {}
 
-        market = detail.get("marketTitle") or detail.get("title") or ""
-        side = detail.get("side") or detail.get("outcome") or ""
+        timestamp = detail.get("updateTime") or detail.get("timestamp") or ""
+        market_slug = detail.get("marketSlug", "")
+
+        # Get market name from beforePosition metadata (has the most info)
+        before = detail.get("beforePosition", {})
+        after = detail.get("afterPosition", {})
+        meta = before.get("marketMetadata", {}) or after.get("marketMetadata", {})
+        market = meta.get("title", "")
+
+        # Side info
+        side = detail.get("side", "")
+        side = side.replace("POSITION_RESOLUTION_SIDE_", "").replace("TRADE_SIDE_", "")
+
+        # For trades: price and quantity directly available
         price = _safe_float(detail.get("price") or detail.get("fillPrice"))
-        quantity = _safe_float(detail.get("quantity") or detail.get("size") or detail.get("amount"))
-        timestamp = detail.get("timestamp") or detail.get("createdAt") or act.get("timestamp") or ""
+        quantity = _safe_float(detail.get("quantity") or detail.get("size"))
+
+        # For resolutions: compute from before/after positions
+        if not quantity and before:
+            quantity = abs(_safe_float(before.get("netPosition")) or 0)
+        if not price and before:
+            cost = _safe_float(before.get("cost"))
+            qty = abs(_safe_float(before.get("netPosition")) or 0)
+            if cost is not None and qty > 0:
+                price = cost / qty
+
+        # P&L for resolutions
+        pnl = None
+        if after:
+            realized = _safe_float(after.get("realized"))
+            if realized is not None:
+                pnl = realized
+
+        # Format timestamp to be more readable
+        if timestamp and "T" in str(timestamp):
+            timestamp = str(timestamp).replace("T", " ")[:19]
 
         parsed.append({
             "timestamp": str(timestamp),
@@ -260,7 +311,8 @@ def parse_activities(activities):
             "side": str(side),
             "price": price,
             "quantity": quantity,
-            "type": act_type,
+            "type": _activity_type_label(act_type),
+            "pnl": pnl,
         })
     return parsed
 
