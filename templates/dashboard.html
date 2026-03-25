@@ -199,6 +199,123 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* --- Bet Slip Modal --- */
+        .betslip-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(4px);
+        }
+        .betslip-overlay.open { display: flex; }
+        .betslip {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            width: 420px;
+            max-width: 92vw;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+        }
+        .betslip-header {
+            padding: 20px 24px 16px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .betslip-header h2 {
+            font-size: 18px;
+            font-weight: 700;
+            color: #e6edf3;
+            letter-spacing: 0.5px;
+        }
+        .betslip-date {
+            font-size: 12px;
+            color: #8b949e;
+            margin-top: 2px;
+        }
+        .betslip-close {
+            background: none;
+            border: none;
+            color: #8b949e;
+            font-size: 22px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            line-height: 1;
+        }
+        .betslip-close:hover { background: #21262d; color: #e6edf3; }
+        .betslip-body { padding: 8px 0; }
+        .betslip-item {
+            padding: 14px 24px;
+            border-bottom: 1px solid #161b22;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .betslip-item:last-child { border-bottom: none; }
+        .betslip-market {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e6edf3;
+            flex: 1;
+            min-width: 0;
+        }
+        .betslip-side {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 3px;
+        }
+        .betslip-side.yes { color: #3fb950; }
+        .betslip-side.no { color: #f85149; }
+        .betslip-odds {
+            font-size: 16px;
+            font-weight: 700;
+            font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+            white-space: nowrap;
+            padding: 6px 12px;
+            border-radius: 6px;
+            background: #161b22;
+            border: 1px solid #30363d;
+        }
+        .betslip-odds.fav { color: #f0883e; }
+        .betslip-odds.dog { color: #58a6ff; }
+        .betslip-footer {
+            padding: 12px 24px 16px;
+            border-top: 1px solid #30363d;
+            text-align: center;
+        }
+        .betslip-footer span {
+            font-size: 11px;
+            color: #484f58;
+            letter-spacing: 0.3px;
+        }
+        .betslip-empty {
+            padding: 32px 24px;
+            text-align: center;
+            color: #8b949e;
+            font-size: 14px;
+        }
+        .btn-betslip {
+            background: linear-gradient(135deg, #f0883e, #d29922);
+            color: #0d1117;
+            border: none;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.3px;
+        }
+        .btn-betslip:hover {
+            background: linear-gradient(135deg, #f4a261, #e3a836);
+        }
+
         /* --- Responsive --- */
         @media (max-width: 768px) {
             .container { padding: 8px; }
@@ -220,6 +337,7 @@
         <h1>Poly-Tracker</h1>
         <div class="navbar-right">
             <span class="status" id="status">Loading...</span>
+            <button class="btn-sm btn-betslip" onclick="openBetSlip()">Bet Slip</button>
             <button class="btn-sm btn-hide" id="btn-hide" onclick="toggleAmounts()" title="Hide/show dollar amounts">&#x1F441;</button>
             <button class="btn-sm btn-refresh" onclick="loadData()">Refresh</button>
             <a href="/logout" class="btn-sm">Logout</a>
@@ -296,6 +414,25 @@
                 <div id="activities-body">
                     <div class="empty-state"><span class="spinner"></span> Loading activity...</div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bet Slip Modal -->
+    <div class="betslip-overlay" id="betslip-overlay" onclick="closeBetSlipOutside(event)">
+        <div class="betslip" id="betslip">
+            <div class="betslip-header">
+                <div>
+                    <h2>BET SLIP</h2>
+                    <div class="betslip-date" id="betslip-date"></div>
+                </div>
+                <button class="betslip-close" onclick="closeBetSlip()">&times;</button>
+            </div>
+            <div class="betslip-body" id="betslip-body">
+                <div class="betslip-empty">No open positions</div>
+            </div>
+            <div class="betslip-footer">
+                <span>POLY-TRACKER</span>
             </div>
         </div>
     </div>
@@ -463,6 +600,66 @@
             return d.innerHTML;
         }
 
+        // --- Bet Slip ---
+        let _lastPositions = [];
+
+        function probToAmericanOdds(prob) {
+            if (prob === null || prob === undefined || prob <= 0 || prob >= 1) return null;
+            if (prob >= 0.5) {
+                return -Math.round(prob / (1 - prob) * 100);
+            } else {
+                return Math.round((1 - prob) / prob * 100);
+            }
+        }
+
+        function fmtOdds(odds) {
+            if (odds === null) return '--';
+            return odds > 0 ? '+' + odds : '' + odds;
+        }
+
+        function openBetSlip() {
+            const overlay = $('betslip-overlay');
+            const body = $('betslip-body');
+            const dateEl = $('betslip-date');
+
+            const now = new Date();
+            dateEl.textContent = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+            if (!_lastPositions.length) {
+                body.innerHTML = '<div class="betslip-empty">No open positions</div>';
+            } else {
+                let html = '';
+                for (const p of _lastPositions) {
+                    const odds = probToAmericanOdds(p.entry_price);
+                    const oddsStr = fmtOdds(odds);
+                    const oddsClass = odds !== null ? (odds < 0 ? 'fav' : 'dog') : '';
+                    const sideClass = p.side === 'YES' ? 'yes' : 'no';
+                    html += `<div class="betslip-item">
+                        <div class="betslip-market">
+                            ${esc(p.market_name)}
+                            <div class="betslip-side ${sideClass}">${esc(p.side)}</div>
+                        </div>
+                        <div class="betslip-odds ${oddsClass}">${oddsStr}</div>
+                    </div>`;
+                }
+                body.innerHTML = html;
+            }
+
+            overlay.classList.add('open');
+        }
+
+        function closeBetSlip() {
+            $('betslip-overlay').classList.remove('open');
+        }
+
+        function closeBetSlipOutside(e) {
+            if (e.target === $('betslip-overlay')) closeBetSlip();
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeBetSlip();
+        });
+
         async function loadData() {
             const statusEl = $('status');
             statusEl.className = 'status loading';
@@ -477,6 +674,7 @@
                 const data = await resp.json();
                 if (!data.ok) throw new Error(data.error || 'API error');
 
+                _lastPositions = data.positions || [];
                 renderCards(data);
                 renderPositions(data.positions);
                 renderClosed(data.closed_positions || []);
