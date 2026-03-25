@@ -51,7 +51,7 @@
         /* --- Summary cards --- */
         .cards {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 16px;
             margin-bottom: 24px;
         }
@@ -62,19 +62,51 @@
             padding: 20px;
         }
         .card .label {
-            font-size: 12px;
+            font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: #8b949e;
             margin-bottom: 6px;
         }
         .card .value {
-            font-size: 24px;
+            font-size: 22px;
             font-weight: 700;
             color: #e6edf3;
         }
         .card .value.positive { color: #3fb950; }
         .card .value.negative { color: #f85149; }
+
+        /* --- Tabs --- */
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #30363d;
+        }
+        .tab {
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #8b949e;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .tab:hover { color: #c9d1d9; }
+        .tab.active {
+            color: #e6edf3;
+            border-bottom-color: #1f6feb;
+        }
+        .tab-count {
+            font-size: 11px;
+            background: #21262d;
+            color: #8b949e;
+            padding: 1px 6px;
+            border-radius: 10px;
+            margin-left: 6px;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
 
         /* --- Tables --- */
         .section {
@@ -155,9 +187,10 @@
         /* --- Responsive --- */
         @media (max-width: 768px) {
             .container { padding: 12px; }
-            .cards { grid-template-columns: repeat(2, 1fr); }
+            .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
             td, th { padding: 8px 10px; font-size: 13px; }
-            .card .value { font-size: 20px; }
+            .card .value { font-size: 18px; }
+            .card { padding: 14px; }
         }
     </style>
 </head>
@@ -179,12 +212,20 @@
                 <div class="value" id="card-balance">--</div>
             </div>
             <div class="card">
-                <div class="label">Positions</div>
+                <div class="label">Open Positions</div>
                 <div class="value" id="card-positions">--</div>
             </div>
             <div class="card">
                 <div class="label">Portfolio Value</div>
                 <div class="value" id="card-value">--</div>
+            </div>
+            <div class="card">
+                <div class="label">Today's P&L</div>
+                <div class="value" id="card-today-pnl">--</div>
+            </div>
+            <div class="card">
+                <div class="label">Yesterday's P&L</div>
+                <div class="value" id="card-yesterday-pnl">--</div>
             </div>
             <div class="card">
                 <div class="label">Total P&L</div>
@@ -196,19 +237,43 @@
             </div>
         </div>
 
-        <!-- Positions table -->
-        <div class="section">
-            <div class="section-header">Open Positions</div>
-            <div id="positions-body">
-                <div class="empty-state"><span class="spinner"></span> Loading positions...</div>
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab active" data-tab="open" onclick="switchTab('open')">
+                Open Positions <span class="tab-count" id="open-count">0</span>
+            </div>
+            <div class="tab" data-tab="closed" onclick="switchTab('closed')">
+                Closed Positions <span class="tab-count" id="closed-count">0</span>
+            </div>
+            <div class="tab" data-tab="activity" onclick="switchTab('activity')">
+                All Activity <span class="tab-count" id="activity-count">0</span>
             </div>
         </div>
 
-        <!-- Trade history -->
-        <div class="section">
-            <div class="section-header">Recent Activity</div>
-            <div id="activities-body">
-                <div class="empty-state"><span class="spinner"></span> Loading activity...</div>
+        <!-- Open Positions tab -->
+        <div class="tab-panel active" id="panel-open">
+            <div class="section">
+                <div id="positions-body">
+                    <div class="empty-state"><span class="spinner"></span> Loading positions...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Closed Positions tab -->
+        <div class="tab-panel" id="panel-closed">
+            <div class="section">
+                <div id="closed-body">
+                    <div class="empty-state"><span class="spinner"></span> Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- All Activity tab -->
+        <div class="tab-panel" id="panel-activity">
+            <div class="section">
+                <div id="activities-body">
+                    <div class="empty-state"><span class="spinner"></span> Loading activity...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -227,9 +292,21 @@
             return val >= 0 ? 'positive' : 'negative';
         }
 
+        function pnlFmt(val) {
+            if (val === null || val === undefined) return '--';
+            const sign = val >= 0 ? '+' : '';
+            return sign + fmt(val, '$');
+        }
+
         function sideTag(side) {
+            if (!side) return '';
             const cls = side === 'YES' ? 'side-yes' : 'side-no';
             return `<span class="${cls}">${side}</span>`;
+        }
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
         }
 
         function renderCards(data) {
@@ -238,12 +315,18 @@
 
             $('card-balance').textContent = b.current_balance !== null ? fmt(b.current_balance, '$') : '--';
             $('card-positions').textContent = s.total_positions;
-
             $('card-value').textContent = fmt(s.total_current, '$');
 
+            const todayEl = $('card-today-pnl');
+            todayEl.textContent = pnlFmt(s.today_pnl);
+            todayEl.className = 'value ' + pnlClass(s.today_pnl);
+
+            const yesterdayEl = $('card-yesterday-pnl');
+            yesterdayEl.textContent = pnlFmt(s.yesterday_pnl);
+            yesterdayEl.className = 'value ' + pnlClass(s.yesterday_pnl);
+
             const pnlEl = $('card-pnl');
-            const sign = s.total_pnl >= 0 ? '+' : '';
-            pnlEl.textContent = sign + fmt(s.total_pnl, '$');
+            pnlEl.textContent = pnlFmt(s.total_pnl);
             pnlEl.className = 'value ' + pnlClass(s.total_pnl);
 
             $('card-winrate').textContent = s.win_rate !== null
@@ -253,6 +336,7 @@
 
         function renderPositions(positions) {
             const el = $('positions-body');
+            $('open-count').textContent = positions.length;
             if (!positions.length) {
                 el.innerHTML = '<div class="empty-state">No open positions</div>';
                 return;
@@ -264,16 +348,39 @@
                 '<th class="right">Return</th></tr></thead><tbody>';
 
             for (const p of positions) {
-                const pnl = p.pnl !== null ? ((p.pnl >= 0 ? '+' : '') + fmt(p.pnl, '$')) : '--';
-                const ret = p.pnl_pct !== null ? ((p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(1) + '%') : '--';
                 html += `<tr>
                     <td>${esc(p.market_name)}</td>
                     <td>${sideTag(p.side)}</td>
                     <td class="right">${p.quantity.toFixed(0)}</td>
                     <td class="right">${p.entry_price !== null ? fmt(p.entry_price, '$') : '--'}</td>
                     <td class="right">${p.current_price !== null ? fmt(p.current_price, '$') : '--'}</td>
-                    <td class="right ${pnlClass(p.pnl)}">${pnl}</td>
-                    <td class="right ${pnlClass(p.pnl_pct)}">${ret}</td>
+                    <td class="right ${pnlClass(p.pnl)}">${pnlFmt(p.pnl)}</td>
+                    <td class="right ${pnlClass(p.pnl_pct)}">${p.pnl_pct !== null ? ((p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(1) + '%') : '--'}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            el.innerHTML = html;
+        }
+
+        function renderClosed(closed) {
+            const el = $('closed-body');
+            $('closed-count').textContent = closed.length;
+            if (!closed.length) {
+                el.innerHTML = '<div class="empty-state">No closed positions yet</div>';
+                return;
+            }
+            let html = '<table><thead><tr>' +
+                '<th>Date</th><th>Market</th>' +
+                '<th class="right">Qty</th><th class="right">Entry</th>' +
+                '<th class="right">P&L</th></tr></thead><tbody>';
+
+            for (const c of closed) {
+                html += `<tr>
+                    <td>${esc(c.timestamp)}</td>
+                    <td>${esc(c.market)}</td>
+                    <td class="right">${c.quantity !== null ? c.quantity.toFixed(0) : '--'}</td>
+                    <td class="right">${c.price !== null ? fmt(c.price, '$') : '--'}</td>
+                    <td class="right ${pnlClass(c.pnl)}">${pnlFmt(c.pnl)}</td>
                 </tr>`;
             }
             html += '</tbody></table>';
@@ -282,6 +389,7 @@
 
         function renderActivities(activities) {
             const el = $('activities-body');
+            $('activity-count').textContent = activities.length;
             if (!activities.length) {
                 el.innerHTML = '<div class="empty-state">No recent activity</div>';
                 return;
@@ -293,13 +401,12 @@
                 '<th>Type</th></tr></thead><tbody>';
 
             for (const a of activities) {
-                const pnl = a.pnl !== null ? ((a.pnl >= 0 ? '+' : '') + fmt(a.pnl, '$')) : '--';
                 html += `<tr>
                     <td>${esc(a.timestamp)}</td>
                     <td>${esc(a.market)}</td>
                     <td class="right">${a.quantity !== null ? a.quantity.toFixed(0) : '--'}</td>
                     <td class="right">${a.price !== null ? fmt(a.price, '$') : '--'}</td>
-                    <td class="right ${pnlClass(a.pnl)}">${pnl}</td>
+                    <td class="right ${pnlClass(a.pnl)}">${pnlFmt(a.pnl)}</td>
                     <td>${esc(a.type)}</td>
                 </tr>`;
             }
@@ -330,15 +437,13 @@
 
                 renderCards(data);
                 renderPositions(data.positions);
+                renderClosed(data.closed_positions || []);
                 renderActivities(data.activities);
 
                 const ts = new Date(data.timestamp);
                 if (data.errors && data.errors.length) {
                     statusEl.className = 'status error';
                     statusEl.textContent = 'Partial data — errors: ' + data.errors.join('; ');
-                } else if (data.debug && data.debug.raw_positions_count === 0 && data.debug.has_credentials) {
-                    statusEl.className = 'status';
-                    statusEl.textContent = 'Updated ' + ts.toLocaleTimeString() + ' (0 positions returned by API)';
                 } else {
                     statusEl.className = 'status';
                     statusEl.textContent = 'Updated ' + ts.toLocaleTimeString();
