@@ -287,26 +287,56 @@ def dashboard():
 @login_required
 def api_data():
     """JSON endpoint that fetches all Polymarket data for the dashboard."""
+    errors = []
     try:
         client = get_client()
-        now = datetime.now(timezone.utc)
-
-        positions = fetch_positions(client)
-        enriched = enrich_positions(client, positions)
-        activities = fetch_activities(client)
-        balances = fetch_balances(client)
-        summary = compute_summary(enriched)
-
-        return jsonify({
-            "ok": True,
-            "timestamp": now.isoformat(),
-            "positions": enriched,
-            "activities": parse_activities(activities),
-            "balances": parse_balances(balances),
-            "summary": summary,
-        })
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": f"Client init failed: {e}"}), 500
+
+    now = datetime.now(timezone.utc)
+
+    positions = []
+    try:
+        positions = fetch_positions(client)
+    except Exception as e:
+        errors.append(f"positions: {e}")
+
+    enriched = []
+    try:
+        enriched = enrich_positions(client, positions)
+    except Exception as e:
+        errors.append(f"enrich: {e}")
+
+    activities = []
+    try:
+        activities = fetch_activities(client)
+    except Exception as e:
+        errors.append(f"activities: {e}")
+
+    balances = None
+    try:
+        balances = fetch_balances(client)
+    except Exception as e:
+        errors.append(f"balances: {e}")
+
+    summary = compute_summary(enriched)
+
+    return jsonify({
+        "ok": True,
+        "timestamp": now.isoformat(),
+        "positions": enriched,
+        "activities": parse_activities(activities),
+        "balances": parse_balances(balances),
+        "summary": summary,
+        "errors": errors,
+        "debug": {
+            "raw_positions_count": len(positions),
+            "enriched_count": len(enriched),
+            "raw_activities_count": len(activities),
+            "balances_type": type(balances).__name__ if balances else "None",
+            "has_credentials": bool(POLYMARKET_KEY_ID and POLYMARKET_SECRET_KEY),
+        },
+    })
 
 
 # ---------------------------------------------------------------------------

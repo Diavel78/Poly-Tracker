@@ -331,8 +331,16 @@
                 renderActivities(data.activities);
 
                 const ts = new Date(data.timestamp);
-                statusEl.className = 'status';
-                statusEl.textContent = 'Updated ' + ts.toLocaleTimeString();
+                if (data.errors && data.errors.length) {
+                    statusEl.className = 'status error';
+                    statusEl.textContent = 'Partial data — errors: ' + data.errors.join('; ');
+                } else if (data.debug && data.debug.raw_positions_count === 0 && data.debug.has_credentials) {
+                    statusEl.className = 'status';
+                    statusEl.textContent = 'Updated ' + ts.toLocaleTimeString() + ' (0 positions returned by API)';
+                } else {
+                    statusEl.className = 'status';
+                    statusEl.textContent = 'Updated ' + ts.toLocaleTimeString();
+                }
             } catch (err) {
                 statusEl.className = 'status error';
                 statusEl.textContent = 'Error: ' + err.message;
