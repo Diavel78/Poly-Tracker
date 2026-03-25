@@ -493,14 +493,18 @@ def api_debug_markets():
 
     try:
         positions_resp = client.portfolio.positions()
+        positions_map = positions_resp.get("positions", {})
     except Exception as e:
         return jsonify({"error": f"positions: {e}"}), 500
 
     results = []
-    for slug, pos in positions_resp.items():
+    for slug, pos in positions_map.items():
         metadata = pos.get("marketMetadata", {})
         market_slug = metadata.get("slug") or slug
-        market_detail = fetch_market(client, market_slug)
+        try:
+            market_detail = fetch_market(client, market_slug)
+        except Exception as e:
+            market_detail = {"_error": str(e)}
         results.append({
             "slug": slug,
             "marketMetadata": metadata,
