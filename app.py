@@ -298,6 +298,30 @@ def dashboard():
     return render_template("dashboard.html")
 
 
+@app.route("/api/raw")
+@login_required
+def api_raw():
+    """Debug endpoint: dump raw SDK responses to see exact structure."""
+    try:
+        client = get_client()
+    except Exception as e:
+        return jsonify({"error": f"Client init: {e}"}), 500
+
+    raw = {}
+    for name, call in [
+        ("positions", lambda: client.portfolio.positions()),
+        ("balances", lambda: client.account.balances()),
+        ("activities", lambda: client.portfolio.activities()),
+    ]:
+        try:
+            result = call()
+            raw[name] = result
+        except Exception as e:
+            raw[name] = {"_error": str(e), "_type": type(e).__name__}
+
+    return jsonify(raw)
+
+
 @app.route("/api/data")
 @login_required
 def api_data():
