@@ -64,36 +64,35 @@ def get_client():
 
 
 def _safe_float(val):
+    """Extract a float from a value, handling Amount dicts like {"value": "1.23", "currency": "USD"}."""
     if val is None:
         return None
+    if isinstance(val, dict) and "value" in val:
+        val = val["value"]
     try:
         return float(val)
     except (TypeError, ValueError):
         return None
 
 
-def _getattr_chain(obj, *attrs, default=None):
-    for attr in attrs:
-        val = getattr(obj, attr, None)
-        if val is not None:
-            return val
+def _get(obj, *keys, default=None):
+    """Get first matching key from a dict."""
+    for key in keys:
+        if isinstance(obj, dict) and key in obj:
+            return obj[key]
     return default
 
 
 # ---------------------------------------------------------------------------
-# Data fetching
+# Data fetching — SDK returns plain dicts
 # ---------------------------------------------------------------------------
 
 def fetch_positions(client):
+    """Returns list of (slug, position_dict) tuples."""
     try:
         response = client.portfolio.positions()
-        if hasattr(response, "data"):
-            return list(response.data)
-        if hasattr(response, "results"):
-            return list(response.results)
-        if isinstance(response, list):
-            return response
-        return list(response)
+        positions_map = response.get("positions", {})
+        return list(positions_map.items())
     except Exception as e:
         print(f"ERROR fetching positions: {e}")
         return []
@@ -102,8 +101,8 @@ def fetch_positions(client):
 def fetch_market_price(client, market_slug):
     try:
         bbo = client.markets.bbo(market_slug)
-        best_bid = _safe_float(getattr(bbo, "best_bid_price", None) or getattr(bbo, "bid", None))
-        best_ask = _safe_float(getattr(bbo, "best_ask_price", None) or getattr(bbo, "ask", None))
+        best_bid = _safe_float(bbo.get("bestBidPrice") or bbo.get("bid"))
+        best_ask = _safe_float(bbo.get("bestAskPrice") or bbo.get("ask"))
         if best_bid is not None and best_ask is not None:
             return (best_bid + best_ask) / 2
         return best_bid or best_ask
@@ -111,23 +110,20 @@ def fetch_market_price(client, market_slug):
         return None
 
 
-def fetch_market(client, market_id):
+def fetch_market(client, slug_or_id):
     try:
-        return client.markets.retrieve(market_id)
+        return client.markets.retrieve_by_slug(slug_or_id)
     except Exception:
-        return None
+        try:
+            return client.markets.retrieve(slug_or_id)
+        except Exception:
+            return None
 
 
 def fetch_activities(client):
     try:
         response = client.portfolio.activities()
-        if hasattr(response, "data"):
-            return list(response.data)
-        if hasattr(response, "results"):
-            return list(response.results)
-        if isinstance(response, list):
-            return response
-        return list(response)
+        return response.get("activities", [])
     except Exception as e:
         print(f"ERROR fetching activities: {e}")
         return []
@@ -135,58 +131,68 @@ def fetch_activities(client):
 
 def fetch_balances(client):
     try:
-        return client.account.balances()
+        response = client.account.balances()
+        bal_list = response.get("balances", [])
+        if bal_list:
+            return bal_list[0]
+        return None
     except Exception as e:
         print(f"ERROR fetching balances: {e}")
         return None
 
 
 def enrich_positions(client, positions):
+    """positions is a list of (slug, pos_dict) tuples from the SDK."""
     enriched = []
-    for pos in positions:
-        market_id = _getattr_chain(pos, "market_id", "marketId", "market")
-        market_slug = _getattr_chain(pos, "market_slug", "marketSlug", "slug")
-        market_name = _getattr_chain(pos, "market_name", "marketName", "title", "question")
-        side = _getattr_chain(pos, "side", "outcome", default="YES")
-        quantity = _safe_float(_getattr_chain(pos, "quantity", "size", "qty", "amount")) or 0
-        entry_price = _safe_float(_getattr_chain(pos, "entry_price", "entryPrice", "avg_price", "avgPrice"))
+    for slug, pos in positions:
+        metadata = pos.get("marketMetadata", {})
+        market_name = metadata.get("title") or metadata.get("question") or slug
+        market_slug = metadata.get("slug") or slug
 
-        if not market_name and market_id:
-            market = fetch_market(client, str(market_id))
-            if market:
-                market_name = _getattr_chain(market, "title", "question", "name", default=str(market_id))
-                if not market_slug:
-                    market_slug = _getattr_chain(market, "slug")
+        net_position = _safe_float(pos.get("netPosition")) or 0
+        quantity = abs(net_position)
+        side = "YES" if net_position >= 0 else "NO"
+
+        cost = _safe_float(pos.get("cost"))
+        entry_price = (cost / quantity) if cost is not None and quantity > 0 else None
+
+        cash_value = _safe_float(pos.get("cashValue"))
+        realized = _safe_float(pos.get("realized"))
 
         current_price = None
         if market_slug:
-            current_price = fetch_market_price(client, str(market_slug))
-        if current_price is None and market_id:
-            current_price = fetch_market_price(client, str(market_id))
+            current_price = fetch_market_price(client, market_slug)
         if current_price is None:
-            current_price = _safe_float(_getattr_chain(pos, "current_price", "currentPrice", "price"))
+            current_price = (cash_value / quantity) if cash_value is not None and quantity > 0 else None
+
+        current_value = cash_value if cash_value is not None else (
+            quantity * current_price if current_price is not None and quantity else None
+        )
 
         pnl = None
         pnl_pct = None
-        current_value = None
-        if current_price is not None and quantity:
-            current_value = quantity * current_price
-            if entry_price is not None:
-                pnl = quantity * (current_price - entry_price)
-                if entry_price > 0:
-                    pnl_pct = ((current_price - entry_price) / entry_price) * 100
+        if current_value is not None and cost is not None:
+            pnl = current_value - cost
+            if realized is not None:
+                pnl += realized
+            if cost > 0:
+                pnl_pct = (pnl / cost) * 100
+        elif realized is not None:
+            pnl = realized
+
+        expired = pos.get("expired", False)
 
         enriched.append({
-            "market_name": market_name or str(market_id or "Unknown"),
-            "market_id": str(market_id or ""),
-            "market_slug": str(market_slug or ""),
-            "side": str(side).upper(),
+            "market_name": market_name,
+            "market_slug": market_slug,
+            "side": side,
             "quantity": quantity,
             "entry_price": entry_price,
             "current_price": current_price,
             "current_value": current_value,
             "pnl": pnl,
             "pnl_pct": pnl_pct,
+            "expired": expired,
         })
 
     return enriched
@@ -206,7 +212,7 @@ def compute_summary(enriched):
             total_current += p["current_value"]
         if p["pnl"] is not None:
             total_pnl += p["pnl"]
-            if p["current_price"] in (0.0, 1.0):
+            if p.get("expired"):
                 resolved_total += 1
                 if p["pnl"] > 0:
                     resolved_wins += 1
@@ -224,28 +230,37 @@ def compute_summary(enriched):
 
 
 def parse_balances(balances):
-    """Extract balance fields into a simple dict."""
-    if balances is None:
+    """Extract balance fields from a UserBalance dict."""
+    if not isinstance(balances, dict):
         return {}
     return {
-        "current_balance": _safe_float(_getattr_chain(balances, "currentBalance", "current_balance", "balance")),
-        "buying_power": _safe_float(_getattr_chain(balances, "buyingPower", "buying_power")),
-        "open_orders": _safe_float(_getattr_chain(balances, "openOrders", "open_orders")),
-        "unsettled": _safe_float(_getattr_chain(balances, "unsettledFunds", "unsettled_funds")),
+        "current_balance": _safe_float(balances.get("currentBalance")),
+        "buying_power": _safe_float(balances.get("buyingPower")),
+        "open_orders": _safe_float(balances.get("openOrders")),
+        "unsettled": _safe_float(balances.get("unsettledFunds")),
     }
 
 
 def parse_activities(activities):
-    """Convert activity objects to plain dicts for the template."""
+    """Convert activity dicts for the template."""
     parsed = []
     for act in activities:
+        act_type = act.get("type", "unknown")
+        detail = act.get(act_type, {}) if isinstance(act.get(act_type), dict) else {}
+
+        market = detail.get("marketTitle") or detail.get("title") or ""
+        side = detail.get("side") or detail.get("outcome") or ""
+        price = _safe_float(detail.get("price") or detail.get("fillPrice"))
+        quantity = _safe_float(detail.get("quantity") or detail.get("size") or detail.get("amount"))
+        timestamp = detail.get("timestamp") or detail.get("createdAt") or act.get("timestamp") or ""
+
         parsed.append({
-            "timestamp": str(_getattr_chain(act, "timestamp", "created_at", "createdAt", "time") or ""),
-            "market": str(_getattr_chain(act, "market_name", "marketName", "title", "market") or ""),
-            "side": str(_getattr_chain(act, "side", "outcome") or ""),
-            "price": _safe_float(_getattr_chain(act, "price", "fill_price", "fillPrice")),
-            "quantity": _safe_float(_getattr_chain(act, "quantity", "size", "qty", "amount")),
-            "type": str(_getattr_chain(act, "type", "action", "activity_type", default="trade")),
+            "timestamp": str(timestamp),
+            "market": str(market),
+            "side": str(side),
+            "price": price,
+            "quantity": quantity,
+            "type": act_type,
         })
     return parsed
 
