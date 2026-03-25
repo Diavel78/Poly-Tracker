@@ -241,13 +241,23 @@ def parse_balances(balances):
     }
 
 
+def _resolve_market_title(client, slug):
+    """Look up a market title by slug."""
+    try:
+        market = client.markets.retrieve_by_slug(slug)
+        return market.get("title", "") or market.get("question", "") or slug
+    except Exception:
+        # Fall back to making the slug readable
+        return slug.replace("-", " ").replace("aec ", "").replace("asc ", "").title()
+
+
 def _activity_type_label(raw_type):
     """Convert ACTIVITY_TYPE_POSITION_RESOLUTION -> Resolution, etc."""
     label = raw_type.replace("ACTIVITY_TYPE_", "").replace("_", " ").title()
     return label or raw_type
 
 
-def parse_activities(activities):
+def parse_activities(client, activities):
     """Convert activity dicts for the template.
 
     Activity types and their detail keys:
@@ -262,6 +272,9 @@ def parse_activities(activities):
         "ACTIVITY_TYPE_ACCOUNT_BALANCE_CHANGE": "accountBalanceChange",
     }
 
+    # Cache for slug -> market title lookups
+    slug_to_title = {}
+
     parsed = []
     for act in activities:
         act_type = act.get("type", "unknown")
@@ -271,43 +284,58 @@ def parse_activities(activities):
         timestamp = detail.get("updateTime") or detail.get("timestamp") or ""
         market_slug = detail.get("marketSlug", "")
 
-        # Get market name from beforePosition metadata (has the most info)
-        before = detail.get("beforePosition", {})
-        after = detail.get("afterPosition", {})
-        meta = before.get("marketMetadata", {}) or after.get("marketMetadata", {})
-        market = meta.get("title", "")
-
-        # Side info
-        side = detail.get("side", "")
-        side = side.replace("POSITION_RESOLUTION_SIDE_", "").replace("TRADE_SIDE_", "")
-
-        # For trades: price and quantity directly available
-        price = _safe_float(detail.get("price") or detail.get("fillPrice"))
-        quantity = _safe_float(detail.get("quantity") or detail.get("size"))
-
-        # For resolutions: compute from before/after positions
-        if not quantity and before:
-            quantity = abs(_safe_float(before.get("netPosition")) or 0)
-        if not price and before:
-            cost = _safe_float(before.get("cost"))
-            qty = abs(_safe_float(before.get("netPosition")) or 0)
-            if cost is not None and qty > 0:
-                price = cost / qty
-
-        # P&L for resolutions
+        market = ""
+        side = ""
+        price = None
+        quantity = None
         pnl = None
-        if after:
+
+        if act_type == "ACTIVITY_TYPE_TRADE":
+            # Trade: fields are price (Amount), qty (str), marketSlug,
+            # costBasis (Amount), realizedPnl (Amount)
+            price = _safe_float(detail.get("price"))
+            quantity = _safe_float(detail.get("qty"))
+            pnl = _safe_float(detail.get("realizedPnl"))
+            # Resolve market name from slug
+            if market_slug:
+                if market_slug not in slug_to_title:
+                    slug_to_title[market_slug] = _resolve_market_title(client, market_slug)
+                market = slug_to_title[market_slug]
+
+        elif act_type == "ACTIVITY_TYPE_POSITION_RESOLUTION":
+            before = detail.get("beforePosition", {})
+            after = detail.get("afterPosition", {})
+            meta = before.get("marketMetadata", {}) or after.get("marketMetadata", {})
+            market = meta.get("title", "")
+            # Cache it for trade lookups
+            if market_slug and market:
+                slug_to_title[market_slug] = market
+
+            side = detail.get("side", "")
+            side = side.replace("POSITION_RESOLUTION_SIDE_", "")
+
+            quantity = abs(_safe_float(before.get("netPosition")) or 0)
+            cost = _safe_float(before.get("cost"))
+            if cost is not None and quantity > 0:
+                price = cost / quantity
+
             realized = _safe_float(after.get("realized"))
             if realized is not None:
                 pnl = realized
 
-        # Format timestamp to be more readable
+        elif act_type == "ACTIVITY_TYPE_ACCOUNT_BALANCE_CHANGE":
+            amount = _safe_float(detail.get("amount"))
+            reason = detail.get("reason", "")
+            market = reason.replace("_", " ").title() if reason else "Balance Change"
+            pnl = amount
+
+        # Format timestamp
         if timestamp and "T" in str(timestamp):
             timestamp = str(timestamp).replace("T", " ")[:19]
 
         parsed.append({
             "timestamp": str(timestamp),
-            "market": str(market),
+            "market": str(market) or market_slug,
             "side": str(side),
             "price": price,
             "quantity": quantity,
@@ -416,7 +444,7 @@ def api_data():
         "ok": True,
         "timestamp": now.isoformat(),
         "positions": enriched,
-        "activities": parse_activities(activities),
+        "activities": parse_activities(client, activities),
         "balances": parse_balances(balances),
         "summary": summary,
         "errors": errors,
