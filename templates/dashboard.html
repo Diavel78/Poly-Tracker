@@ -617,6 +617,38 @@
             return odds > 0 ? '+' + odds : '' + odds;
         }
 
+        function buildBetSlipLabel(p) {
+            const title = (p.market_name || '').replace(/\s+\d{4}-\d{2}-\d{2}$/, ''); // strip trailing date
+            const outcome = p.outcome || '';
+            const side = p.side;
+
+            let event = title;
+            let pick = outcome || title;
+
+            // For NO bets on head-to-head (vs.) markets, show the opponent
+            if (side === 'NO' && outcome) {
+                const vsMatch = title.match(/^(.+?)\s+vs\.?\s+(.+?)(?:\s+\d{4}-\d{2}-\d{2})?$/i);
+                if (vsMatch) {
+                    const playerA = vsMatch[1].trim();
+                    const playerB = vsMatch[2].trim();
+                    // If outcome matches one player, pick is the other
+                    if (outcome.trim() === playerA) {
+                        pick = playerB;
+                    } else if (outcome.trim() === playerB) {
+                        pick = playerA;
+                    }
+                    event = playerA + ' vs. ' + playerB;
+                }
+            }
+
+            // If pick equals the event name (no separate outcome), just show the event
+            if (pick === event) {
+                return { display: event, hasLine: false };
+            }
+
+            return { display: event + ' — ' + pick, hasLine: false };
+        }
+
         function openBetSlip() {
             const overlay = $('betslip-overlay');
             const body = $('betslip-body');
@@ -633,20 +665,10 @@
                     const odds = probToAmericanOdds(p.entry_price);
                     const oddsStr = fmtOdds(odds);
                     const oddsClass = odds !== null ? (odds < 0 ? 'fav' : 'dog') : '';
-                    const sideClass = p.side === 'YES' ? 'yes' : 'no';
-
-                    // Show the specific pick (outcome) if available, otherwise market name
-                    let pickLabel = esc(p.market_name);
-                    if (p.outcome) {
-                        pickLabel = esc(p.outcome);
-                    }
-                    const sideLabel = p.side === 'YES' ? 'YES' : 'NO';
+                    const label = buildBetSlipLabel(p);
 
                     html += `<div class="betslip-item">
-                        <div class="betslip-market">
-                            ${pickLabel}
-                            <div class="betslip-side ${sideClass}">${sideLabel}</div>
-                        </div>
+                        <div class="betslip-market">${esc(label.display)}</div>
                         <div class="betslip-odds ${oddsClass}">${oddsStr}</div>
                     </div>`;
                 }
