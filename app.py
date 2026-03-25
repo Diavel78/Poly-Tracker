@@ -159,7 +159,26 @@ def enrich_positions(client, positions):
         metadata = pos.get("marketMetadata", {})
         market_name = metadata.get("title") or metadata.get("question") or slug
         market_slug = metadata.get("slug") or slug
-        outcome = metadata.get("outcome") or ""
+        event_slug = metadata.get("eventSlug") or ""
+        raw_outcome = metadata.get("outcome") or ""
+        team = metadata.get("team") or {}
+        team_name = team.get("name", "") if isinstance(team, dict) else ""
+
+        # Derive meaningful pick label:
+        # 1. Use team name if available (e.g., "Duke")
+        # 2. If outcome is not just Yes/No, use it (e.g., "Over 220.5", "Lakers -3.5")
+        # 3. Try to derive from slug by removing event slug prefix
+        # 4. Fall back to empty
+        if team_name:
+            outcome = team_name
+        elif raw_outcome.lower() not in ("yes", "no", ""):
+            outcome = raw_outcome
+        elif event_slug and market_slug.startswith(event_slug + "-"):
+            # e.g., slug "aec-ncaa-winner-duke" minus eventSlug "aec-ncaa-winner" = "duke"
+            suffix = market_slug[len(event_slug) + 1:]
+            outcome = suffix.replace("-", " ").title()
+        else:
+            outcome = ""
 
         net_position = _safe_float(pos.get("netPosition")) or 0
         quantity = abs(net_position)
