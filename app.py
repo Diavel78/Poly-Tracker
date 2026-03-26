@@ -430,11 +430,14 @@ def parse_activities(client, activities):
             if abs(pnl_diff) > 0.001:
                 pnl = pnl_diff
             elif cost is not None:
-                # Determine if position won: YES position wins if side=YES,
-                # NO position (negative netPosition) wins if side=NO
+                # Determine if position won:
+                # SDK side can be YES/NO or LONG/SHORT after prefix strip
+                # LONG = YES side won, SHORT = NO side won
                 net = _safe_float(before.get("netPosition")) or 0
                 held_yes = net > 0
-                won = (held_yes and side == "YES") or (not held_yes and side == "NO")
+                yes_won = side in ("YES", "LONG")
+                no_won = side in ("NO", "SHORT")
+                won = (held_yes and yes_won) or (not held_yes and no_won)
                 if won:
                     pnl = quantity - cost  # payout is $1 * qty
                 else:
