@@ -396,9 +396,19 @@ def parse_activities(client, activities):
         if act_type == "ACTIVITY_TYPE_TRADE":
             price = _safe_float(detail.get("price"))
             quantity = _safe_float(detail.get("qty"))
-            # SDK's realizedPnl on trades is unreliable — don't use it
-            # Real P&L comes from position resolutions
-            pnl = None
+            cost_basis = _safe_float(detail.get("costBasis"))
+
+            # Compute trade P&L from cost basis (SDK's realizedPnl is unreliable)
+            # A closing/sell trade has a costBasis — P&L = proceeds - cost
+            if cost_basis is not None and price is not None and quantity:
+                proceeds = price * quantity
+                pnl = proceeds - cost_basis
+                # Only show P&L on closing trades (where cost_basis > 0)
+                if abs(cost_basis) < 0.001:
+                    pnl = None
+            else:
+                pnl = None
+
             # Resolve market name from slug
             if market_slug:
                 if market_slug not in slug_to_title:
