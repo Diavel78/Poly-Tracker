@@ -85,6 +85,10 @@ Key types from `polymarket_us` (in `polymarket_us.types`):
 - `Team`: `name`, `abbreviation`, `league`, `record`, `logo`, `displayAbbreviation`
 - Position dict keys: `netPosition`, `cost`, `cashValue`, `realized`, `expired`, `marketMetadata`
 - Amount fields are dicts: `{"value": "1.23", "currency": "USD"}` — use `_safe_float()` to extract
+- **Resolution side values**: SDK returns `POSITION_RESOLUTION_SIDE_LONG` / `POSITION_RESOLUTION_SIDE_SHORT` (stripped to `LONG`/`SHORT`). LONG = YES side won, SHORT = NO side won. Do NOT compare against "YES"/"NO" — use `side in ("YES", "LONG")` etc.
+- **marketMetadata.outcome**: For spread markets this is the numeric line (e.g., "-1.50"), NOT the team name. For O/U it's "Over"/"Under". For moneyline/futures it's often just "Yes"/"No". Combine with `team.name` for full pick labels.
+- **MarketDetail.question**: Contains line descriptions (e.g., "Spread: BOS Bruins (+1.5)", "Total: Over/Under 6.5"). Use regex to extract totals for O/U picks.
+- **Timestamps**: Activity timestamps are UTC with space separator (e.g., "2026-03-26 03:14:50"). Normalize to "T" separator before `fromisoformat()`. Always convert to client timezone for today/yesterday P&L boundaries.
 
 ## Common Tasks
 
