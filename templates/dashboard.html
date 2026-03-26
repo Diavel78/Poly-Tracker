@@ -554,7 +554,7 @@
 
             for (const c of closed) {
                 html += `<tr>
-                    <td>${esc(c.timestamp)}</td>
+                    <td>${localTime(c.timestamp)}</td>
                     <td>${esc(c.market)}</td>
                     <td class="right">${c.quantity !== null ? c.quantity.toFixed(0) : '--'}</td>
                     <td class="right">${c.price !== null ? amt(c.price, '$') : '--'}</td>
@@ -580,7 +580,7 @@
 
             for (const a of activities) {
                 html += `<tr>
-                    <td>${esc(a.timestamp)}</td>
+                    <td>${localTime(a.timestamp)}</td>
                     <td>${esc(a.market)}</td>
                     <td class="right">${a.quantity !== null ? a.quantity.toFixed(0) : '--'}</td>
                     <td class="right">${a.price !== null ? amt(a.price, '$') : '--'}</td>
@@ -597,6 +597,20 @@
             const d = document.createElement('div');
             d.textContent = str;
             return d.innerHTML;
+        }
+
+        function localTime(utcStr) {
+            // Convert "2026-03-26 03:14:50" (UTC) to local time display
+            if (!utcStr) return '';
+            try {
+                const dt = new Date(utcStr.replace(' ', 'T') + 'Z');
+                if (isNaN(dt)) return utcStr;
+                return dt.toLocaleString('en-US', {
+                    month: 'short', day: 'numeric',
+                    hour: 'numeric', minute: '2-digit',
+                    hour12: true
+                });
+            } catch (e) { return utcStr; }
         }
 
         // --- Bet Slip ---

@@ -394,11 +394,11 @@ def parse_activities(client, activities):
         pnl = None
 
         if act_type == "ACTIVITY_TYPE_TRADE":
-            # Trade: fields are price (Amount), qty (str), marketSlug,
-            # costBasis (Amount), realizedPnl (Amount)
             price = _safe_float(detail.get("price"))
             quantity = _safe_float(detail.get("qty"))
-            pnl = _safe_float(detail.get("realizedPnl"))
+            # SDK's realizedPnl on trades is unreliable — don't use it
+            # Real P&L comes from position resolutions
+            pnl = None
             # Resolve market name from slug
             if market_slug:
                 if market_slug not in slug_to_title:
