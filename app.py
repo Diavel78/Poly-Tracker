@@ -322,6 +322,12 @@ def compute_summary(enriched, parsed_activities, tz_offset_minutes=0):
         "resolved_total": resolved_total,
         "resolved_wins": resolved_wins,
         "win_rate": win_rate,
+        "_debug_tz": {
+            "tz_offset_minutes": tz_offset_minutes,
+            "today_str": today_str,
+            "yesterday_str": yesterday_str,
+            "now_local": now_local.isoformat(),
+        },
     }
 
 
