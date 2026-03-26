@@ -289,18 +289,19 @@ def compute_summary(enriched, parsed_activities, tz_offset_minutes=0):
             if act["pnl"] > 0:
                 resolved_wins += 1
 
-            # Convert activity timestamp to client's local date for comparison
+            # Convert activity timestamp (UTC) to client's local date
             ts = act.get("timestamp", "")
+            act_local = ""
             if ts:
                 try:
-                    act_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    # Normalize: "2026-03-26 03:14:50" → "2026-03-26T03:14:50"
+                    ts_norm = str(ts).replace(" ", "T").replace("Z", "+00:00")
+                    act_dt = datetime.fromisoformat(ts_norm)
                     if act_dt.tzinfo is None:
                         act_dt = act_dt.replace(tzinfo=timezone.utc)
                     act_local = act_dt.astimezone(client_tz).strftime("%Y-%m-%d")
                 except (ValueError, TypeError):
-                    act_local = ts[:10]
-            else:
-                act_local = ""
+                    act_local = ""
 
             if act_local == today_str:
                 today_pnl += act["pnl"]
