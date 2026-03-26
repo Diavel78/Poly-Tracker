@@ -396,18 +396,10 @@ def parse_activities(client, activities):
         if act_type == "ACTIVITY_TYPE_TRADE":
             price = _safe_float(detail.get("price"))
             quantity = _safe_float(detail.get("qty"))
-            cost_basis = _safe_float(detail.get("costBasis"))
-
-            # Compute trade P&L from cost basis (SDK's realizedPnl is unreliable)
-            # A closing/sell trade has a costBasis — P&L = proceeds - cost
-            if cost_basis is not None and price is not None and quantity:
-                proceeds = price * quantity
-                pnl = proceeds - cost_basis
-                # Only show P&L on closing trades (where cost_basis > 0)
-                if abs(cost_basis) < 0.001:
-                    pnl = None
-            else:
-                pnl = None
+            # SDK's realizedPnl: null for buys, non-null for sells/closes
+            sdk_rpnl = _safe_float(detail.get("realizedPnl"))
+            is_close = sdk_rpnl is not None
+            pnl = None  # computed in post-processing pass below
 
             # Resolve market name from slug
             if market_slug:
@@ -466,12 +458,52 @@ def parse_activities(client, activities):
         parsed.append({
             "timestamp": str(timestamp),
             "market": str(market) or market_slug,
+            "_market_slug": market_slug,
+            "_is_close": is_close if act_type == "ACTIVITY_TYPE_TRADE" else False,
             "side": str(side),
             "price": price,
             "quantity": quantity,
             "type": _activity_type_label(act_type),
             "pnl": pnl,
         })
+
+    # Post-process: compute trade P&L from tracked average cost per slug.
+    # SDK's realizedPnl and costBasis are unreliable, so we track it ourselves.
+    # Activities come newest-first; process chronologically (reversed).
+    slug_positions = {}  # slug -> {"qty": float, "total_cost": float}
+    trade_indices = []   # indices of Trade activities (in chronological order)
+
+    for i in range(len(parsed) - 1, -1, -1):
+        act = parsed[i]
+        if act["type"] != "Trade":
+            continue
+        slug = act["_market_slug"]
+        if not slug or act["price"] is None or not act["quantity"]:
+            continue
+
+        if slug not in slug_positions:
+            slug_positions[slug] = {"qty": 0.0, "total_cost": 0.0}
+        pos = slug_positions[slug]
+
+        if not act["_is_close"]:
+            # Buy/open: accumulate cost
+            pos["qty"] += act["quantity"]
+            pos["total_cost"] += act["price"] * act["quantity"]
+        else:
+            # Sell/close: compute P&L from tracked average cost
+            if pos["qty"] > 0:
+                avg_cost = pos["total_cost"] / pos["qty"]
+                act["pnl"] = round((act["price"] - avg_cost) * act["quantity"], 2)
+                pos["total_cost"] -= avg_cost * act["quantity"]
+                pos["qty"] -= act["quantity"]
+            else:
+                act["pnl"] = None
+
+    # Strip internal fields before returning
+    for act in parsed:
+        act.pop("_market_slug", None)
+        act.pop("_is_close", None)
+
     return parsed
 
 
