@@ -766,6 +766,39 @@ def api_raw():
     return jsonify(raw)
 
 
+@app.route("/api/debug-kalshi")
+@login_required
+def api_debug_kalshi():
+    """Debug: show raw Kalshi API responses."""
+    debug = {
+        "has_api_key": bool(KALSHI_API_KEY),
+        "api_key_preview": KALSHI_API_KEY[:8] + "..." if KALSHI_API_KEY else "",
+        "has_private_key": bool(KALSHI_PRIVATE_KEY),
+        "private_key_length": len(KALSHI_PRIVATE_KEY),
+        "private_key_starts": KALSHI_PRIVATE_KEY[:30] if KALSHI_PRIVATE_KEY else "",
+    }
+
+    kclient = get_kalshi_client()
+    if not kclient:
+        debug["client"] = "None — credentials not detected or client creation failed"
+        return jsonify(debug)
+
+    debug["client"] = "OK"
+
+    for name, call in [
+        ("balance", lambda: kclient.get_balance()),
+        ("positions_unsettled", lambda: kclient.get_positions(settlement_status="unsettled", count_filter="has_value")),
+        ("positions_settled", lambda: kclient.get_positions(settlement_status="settled", count_filter="has_value")),
+        ("fills", lambda: kclient.get_fills(limit=5)),
+    ]:
+        try:
+            debug[name] = call()
+        except Exception as e:
+            debug[name] = {"_error": str(e), "_type": type(e).__name__}
+
+    return jsonify(debug)
+
+
 @app.route("/api/debug-markets")
 @login_required
 def api_debug_markets():
