@@ -772,13 +772,29 @@ def kalshi_parse_settlements(kclient, settlements, title_cache=None):
         ticker = s.get("ticker", "")
         market_name = title_cache.get(ticker) or _kalshi_title_cache.get(ticker, ticker)
 
-        yes_count = s.get("yes_count", 0) or 0
-        no_count = s.get("no_count", 0) or 0
-        yes_cost = (s.get("yes_total_cost", 0) or 0) / 100.0
-        no_cost = (s.get("no_total_cost", 0) or 0) / 100.0
+        # Counts are strings like "5.00"
+        try:
+            yes_count = float(s.get("yes_count_fp", "0") or "0")
+        except (TypeError, ValueError):
+            yes_count = 0
+        try:
+            no_count = float(s.get("no_count_fp", "0") or "0")
+        except (TypeError, ValueError):
+            no_count = 0
+
+        # Costs are strings in dollars like "1.900000"
+        try:
+            yes_cost = float(s.get("yes_total_cost_dollars", "0") or "0")
+        except (TypeError, ValueError):
+            yes_cost = 0
+        try:
+            no_cost = float(s.get("no_total_cost_dollars", "0") or "0")
+        except (TypeError, ValueError):
+            no_cost = 0
+
+        # Revenue is in cents
         revenue = (s.get("revenue", 0) or 0) / 100.0
 
-        # Fee cost is a string in dollars
         try:
             fee = float(s.get("fee_cost", "0") or "0")
         except (TypeError, ValueError):
