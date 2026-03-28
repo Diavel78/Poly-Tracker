@@ -550,7 +550,7 @@ def get_kalshi_client():
 
 
 def kalshi_fetch_positions(kclient):
-    """Fetch all positions from Kalshi using raw API."""
+    """Fetch open positions from Kalshi using raw API."""
     import json as _json
     try:
         url = f"{kclient.configuration.host}/portfolio/positions"
@@ -562,8 +562,15 @@ def kalshi_fetch_positions(kclient):
         response.read()
         raw = _json.loads(response.data.decode('utf-8'))
         all_positions = raw.get("market_positions", [])
-        # Open = has position and no settlement
-        open_pos = [p for p in all_positions if abs(p.get("position", 0)) > 0 and not p.get("settlement_value")]
+        # Filter to positions with actual quantity
+        open_pos = []
+        for p in all_positions:
+            try:
+                qty = float(p.get("position_fp") or p.get("position") or "0")
+            except (TypeError, ValueError):
+                qty = 0
+            if abs(qty) > 0:
+                open_pos.append(p)
         return open_pos
     except Exception as e:
         print(f"ERROR fetching Kalshi positions: {e}")
@@ -635,30 +642,31 @@ def kalshi_enrich_positions(kclient, positions):
         market_name = market.get("title", ticker)
         subtitle = market.get("subtitle", "")
 
-        # Position qty — can be int or string
-        raw_pos = pos.get("position", 0)
+        # Position qty — position_fp is string like "5.00"
         try:
-            position_val = int(float(str(raw_pos))) if raw_pos else 0
+            position_val = float(pos.get("position_fp") or pos.get("position") or "0")
         except (TypeError, ValueError):
             position_val = 0
         quantity = abs(position_val)
         if quantity == 0:
             continue
 
-        # Market exposure — try dollars string first, fall back to cents int
-        exposure_str = pos.get("market_exposure_dollars")
-        if exposure_str:
-            try:
-                market_exposure = float(exposure_str)
-            except (TypeError, ValueError):
-                market_exposure = (pos.get("market_exposure", 0) or 0) / 100.0
-        else:
-            market_exposure = (pos.get("market_exposure", 0) or 0) / 100.0
+        # Market exposure — market_exposure_dollars is string in dollars
+        try:
+            market_exposure = float(pos.get("market_exposure_dollars") or "0")
+        except (TypeError, ValueError):
+            market_exposure = 0
         entry_price = (market_exposure / quantity) if quantity > 0 else None
 
-        # Current price from market mid
-        yes_bid = (market.get("yes_bid", 0) or 0) / 100.0
-        yes_ask = (market.get("yes_ask", 0) or 0) / 100.0
+        # Current price from market — yes_bid/yes_ask may be cents or absent
+        try:
+            yes_bid = float(pos.get("yes_bid") or market.get("yes_bid") or 0) / 100.0
+        except (TypeError, ValueError):
+            yes_bid = 0
+        try:
+            yes_ask = float(pos.get("yes_ask") or market.get("yes_ask") or 0) / 100.0
+        except (TypeError, ValueError):
+            yes_ask = 0
         current_price = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
 
         current_value = quantity * current_price if current_price and quantity else None
@@ -674,7 +682,7 @@ def kalshi_enrich_positions(kclient, positions):
             "market_name": market_name,
             "market_slug": ticker,
             "outcome": subtitle or "",
-            "side": "YES" if pos.get("position", 0) > 0 else "NO",
+            "side": "YES" if position_val > 0 else "NO",
             "quantity": quantity,
             "entry_price": entry_price,
             "current_price": current_price,
