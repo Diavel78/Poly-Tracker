@@ -515,6 +515,10 @@ def parse_activities(client, activities):
 # Kalshi integration
 # ---------------------------------------------------------------------------
 
+# Module-level cache: persists between requests on same Vercel container
+_kalshi_title_cache = {}
+
+
 def _to_dict(obj):
     """Convert SDK response objects to plain dicts recursively."""
     if isinstance(obj, dict):
@@ -602,17 +606,12 @@ def kalshi_fetch_fills(kclient, limit=500):
 
 
 def kalshi_fetch_market(kclient, ticker):
-    """Fetch market details for a Kalshi ticker."""
+    """Fetch market details for a Kalshi ticker. Uses module-level cache."""
+    global _kalshi_title_cache
+    if ticker in _kalshi_title_cache:
+        return {"title": _kalshi_title_cache[ticker]}
+
     import json as _json
-    try:
-        # Try SDK first
-        resp = _to_dict(kclient.get_market(ticker))
-        market = resp.get("market", resp)
-        if market.get("title"):
-            return market
-    except Exception:
-        pass
-    # Fall back to raw API
     try:
         url = f"{kclient.configuration.host}/markets/{ticker}"
         response = kclient.call_api(
@@ -622,7 +621,10 @@ def kalshi_fetch_market(kclient, ticker):
         )
         response.read()
         raw = _json.loads(response.data.decode('utf-8'))
-        return raw.get("market", raw)
+        market = raw.get("market", raw)
+        if market.get("title"):
+            _kalshi_title_cache[ticker] = market["title"]
+        return market
     except Exception as e:
         print(f"ERROR fetching Kalshi market {ticker}: {e}")
         return {}
@@ -678,11 +680,19 @@ def kalshi_enrich_positions(kclient, positions):
     return enriched
 
 
+def _ticker_to_readable(ticker):
+    """Convert a Kalshi ticker like KXNCAAMBSPREAD-26MAR17DAVOKST-OKST4 to something readable.
+    Uses module-level cache if title was previously fetched."""
+    if ticker in _kalshi_title_cache:
+        return _kalshi_title_cache[ticker]
+    return ticker
+
+
 def kalshi_parse_fills(kclient, fills, title_cache=None):
     """Convert Kalshi fills to activity format matching Polymarket activities.
 
-    API returns: action, side, count_fp (string), no_price_dollars/yes_price_dollars (string),
-    ticker, created_time, fee_cost, etc.
+    Uses cached titles from settlements; does NOT do individual market lookups
+    to avoid timeouts with large fill counts.
     """
     if title_cache is None:
         title_cache = {}
@@ -690,9 +700,6 @@ def kalshi_parse_fills(kclient, fills, title_cache=None):
 
     for fill in fills:
         ticker = fill.get("ticker", "") or fill.get("market_ticker", "")
-        if ticker and ticker not in title_cache:
-            m = kalshi_fetch_market(kclient, ticker)
-            title_cache[ticker] = m.get("title", ticker)
 
         action = fill.get("action", "")  # "buy" or "sell"
         side = fill.get("side", "")  # "yes" or "no"
@@ -723,7 +730,7 @@ def kalshi_parse_fills(kclient, fills, title_cache=None):
         parsed.append({
             "platform": "kalshi",
             "timestamp": str(timestamp),
-            "market": title_cache.get(ticker, ticker),
+            "market": title_cache.get(ticker) or _ticker_to_readable(ticker),
             "side": side.upper() if side else "",
             "price": price,
             "quantity": count,
@@ -775,17 +782,26 @@ def kalshi_parse_settlements(kclient, settlements, title_cache=None):
     yes_total_cost, no_count, no_total_cost, revenue (all in cents),
     settled_time, fee_cost (string dollars).
     """
+    global _kalshi_title_cache
     if title_cache is None:
         title_cache = {}
     closed = []
 
+    # Collect unique tickers to look up (skip ones already cached)
+    unique_tickers = set()
+    for s in settlements:
+        t = s.get("ticker", "")
+        if t and t not in _kalshi_title_cache and t not in title_cache:
+            unique_tickers.add(t)
+
+    # Look up titles (these are settlements so count is manageable)
+    for ticker in unique_tickers:
+        m = kalshi_fetch_market(kclient, ticker)
+        title_cache[ticker] = m.get("title", ticker)
+
     for s in settlements:
         ticker = s.get("ticker", "")
-        if ticker and ticker not in title_cache:
-            m = kalshi_fetch_market(kclient, ticker)
-            title_cache[ticker] = m.get("title", ticker)
-
-        market_name = title_cache.get(ticker, ticker)
+        market_name = title_cache.get(ticker) or _kalshi_title_cache.get(ticker, ticker)
 
         yes_count = s.get("yes_count", 0) or 0
         no_count = s.get("no_count", 0) or 0
@@ -1063,9 +1079,9 @@ def api_data():
         except Exception as e:
             errors.append(f"kalshi settlements: {e}")
 
-        # Fills second — reuses title cache from settlements
+        # Fills second — reuses title cache from settlements, limit to recent
         try:
-            k_fills = kalshi_fetch_fills(kclient)
+            k_fills = kalshi_fetch_fills(kclient, limit=100)
             kalshi_acts.extend(kalshi_parse_fills(kclient, k_fills, kalshi_title_cache))
         except Exception as e:
             errors.append(f"kalshi fills: {e}")
