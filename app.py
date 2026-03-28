@@ -568,17 +568,25 @@ def kalshi_fetch_balance(kclient):
 
 
 def kalshi_fetch_fills(kclient, limit=500):
-    """Fetch recent fills (trades) from Kalshi."""
+    """Fetch recent fills (trades) from Kalshi.
+
+    Uses raw API call to bypass SDK Pydantic validation which crashes
+    on fills with None values for count/price fields.
+    """
+    import json as _json
     try:
-        resp = _to_dict(kclient.get_fills(limit=limit))
-        return resp.get("fills", [])
+        url = f"{kclient.configuration.host}/trade-api/v2/portfolio/fills?limit={limit}"
+        response = kclient.call_api(
+            method='GET',
+            url=url,
+            header_params={'Accept': 'application/json'}
+        )
+        response.read()
+        raw = _json.loads(response.data.decode('utf-8'))
+        fills = raw.get("fills", [])
+        # Filter out fills with missing required fields
+        return [f for f in fills if f.get("count") is not None and f.get("yes_price") is not None]
     except Exception as e:
-        # SDK may fail on fills with None fields; try without limit
-        try:
-            resp = _to_dict(kclient.get_fills())
-            return resp.get("fills", [])
-        except Exception:
-            pass
         print(f"ERROR fetching Kalshi fills: {e}")
         return []
 
@@ -809,12 +817,18 @@ def api_debug_kalshi():
         for name, call in [
             ("balance", lambda: kclient.get_balance()),
             ("positions", lambda: kclient.get_positions()),
-            ("fills", lambda: kclient.get_fills()),
         ]:
             try:
                 debug[name] = _to_dict(call())
             except Exception as e:
                 debug[name] = {"_error": str(e), "_type": type(e).__name__}
+
+        # Fills: use raw API to bypass SDK Pydantic bug
+        try:
+            debug["fills"] = kalshi_fetch_fills(kclient, limit=5)
+            debug["fills_count"] = len(debug["fills"])
+        except Exception as e:
+            debug["fills"] = {"_error": str(e), "_type": type(e).__name__}
 
         return jsonify(debug)
     except Exception as e:
