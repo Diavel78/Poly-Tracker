@@ -778,7 +778,21 @@ def api_debug_kalshi():
         "private_key_starts": KALSHI_PRIVATE_KEY[:30] if KALSHI_PRIVATE_KEY else "",
     }
 
-    kclient = get_kalshi_client()
+    # Check if package can be imported
+    try:
+        import kalshi_python_sync
+        debug["package"] = "imported OK"
+        debug["package_version"] = getattr(kalshi_python_sync, "__version__", "unknown")
+    except ImportError as e:
+        debug["package"] = f"IMPORT FAILED: {e}"
+        return jsonify(debug)
+
+    try:
+        kclient = get_kalshi_client()
+    except Exception as e:
+        debug["client"] = f"FAILED: {type(e).__name__}: {e}"
+        return jsonify(debug)
+
     if not kclient:
         debug["client"] = "None — credentials not detected or client creation failed"
         return jsonify(debug)
