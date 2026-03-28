@@ -825,10 +825,18 @@ def api_debug_kalshi():
 
         # Fills: use raw API to bypass SDK Pydantic bug
         try:
-            debug["fills"] = kalshi_fetch_fills(kclient, limit=5)
-            debug["fills_count"] = len(debug["fills"])
+            import json as _json
+            url = f"{kclient.configuration.host}/trade-api/v2/portfolio/fills?limit=3"
+            response = kclient.call_api(
+                method='GET',
+                url=url,
+                header_params={'Accept': 'application/json'}
+            )
+            response.read()
+            raw_fills = _json.loads(response.data.decode('utf-8'))
+            debug["fills_raw"] = raw_fills
         except Exception as e:
-            debug["fills"] = {"_error": str(e), "_type": type(e).__name__}
+            debug["fills_raw"] = {"_error": str(e), "_type": type(e).__name__}
 
         return jsonify(debug)
     except Exception as e:
