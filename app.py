@@ -678,21 +678,21 @@ def kalshi_enrich_positions(kclient, positions):
     return enriched
 
 
-def kalshi_parse_fills(kclient, fills):
+def kalshi_parse_fills(kclient, fills, title_cache=None):
     """Convert Kalshi fills to activity format matching Polymarket activities.
 
     API returns: action, side, count_fp (string), no_price_dollars/yes_price_dollars (string),
     ticker, created_time, fee_cost, etc.
     """
-    # Cache market titles
-    ticker_titles = {}
+    if title_cache is None:
+        title_cache = {}
     parsed = []
 
     for fill in fills:
         ticker = fill.get("ticker", "") or fill.get("market_ticker", "")
-        if ticker and ticker not in ticker_titles:
+        if ticker and ticker not in title_cache:
             m = kalshi_fetch_market(kclient, ticker)
-            ticker_titles[ticker] = m.get("title", ticker)
+            title_cache[ticker] = m.get("title", ticker)
 
         action = fill.get("action", "")  # "buy" or "sell"
         side = fill.get("side", "")  # "yes" or "no"
@@ -723,7 +723,7 @@ def kalshi_parse_fills(kclient, fills):
         parsed.append({
             "platform": "kalshi",
             "timestamp": str(timestamp),
-            "market": ticker_titles.get(ticker, ticker),
+            "market": title_cache.get(ticker, ticker),
             "side": side.upper() if side else "",
             "price": price,
             "quantity": count,
@@ -768,24 +768,24 @@ def kalshi_fetch_settlements(kclient, limit=200):
     return all_settlements
 
 
-def kalshi_parse_settlements(kclient, settlements):
+def kalshi_parse_settlements(kclient, settlements, title_cache=None):
     """Convert Kalshi settlements to closed position activity format.
 
     Each settlement has: ticker, market_result (yes/no/void), yes_count,
     yes_total_cost, no_count, no_total_cost, revenue (all in cents),
     settled_time, fee_cost (string dollars).
     """
-    # Cache market titles
-    ticker_titles = {}
+    if title_cache is None:
+        title_cache = {}
     closed = []
 
     for s in settlements:
         ticker = s.get("ticker", "")
-        if ticker and ticker not in ticker_titles:
+        if ticker and ticker not in title_cache:
             m = kalshi_fetch_market(kclient, ticker)
-            ticker_titles[ticker] = m.get("title", ticker)
+            title_cache[ticker] = m.get("title", ticker)
 
-        market_name = ticker_titles.get(ticker, ticker)
+        market_name = title_cache.get(ticker, ticker)
 
         yes_count = s.get("yes_count", 0) or 0
         no_count = s.get("no_count", 0) or 0
@@ -1041,6 +1041,9 @@ def api_data():
 
     kclient = get_kalshi_client()
     if kclient:
+        # Shared title cache to avoid redundant market lookups across functions
+        kalshi_title_cache = {}
+
         try:
             k_open, _ = kalshi_fetch_positions(kclient)
             kalshi_enriched = kalshi_enrich_positions(kclient, k_open)
@@ -1048,20 +1051,22 @@ def api_data():
             errors.append(f"kalshi positions: {e}")
 
         try:
-            k_settlements = kalshi_fetch_settlements(kclient)
-            kalshi_settled_acts = kalshi_parse_settlements(kclient, k_settlements)
-            kalshi_acts.extend(kalshi_settled_acts)
-        except Exception as e:
-            errors.append(f"kalshi settlements: {e}")
-
-        try:
             kalshi_balance = kalshi_fetch_balance(kclient)
         except Exception as e:
             errors.append(f"kalshi balance: {e}")
 
+        # Settlements first (closed positions with P&L) — populates title cache
+        try:
+            k_settlements = kalshi_fetch_settlements(kclient)
+            kalshi_settled_acts = kalshi_parse_settlements(kclient, k_settlements, kalshi_title_cache)
+            kalshi_acts.extend(kalshi_settled_acts)
+        except Exception as e:
+            errors.append(f"kalshi settlements: {e}")
+
+        # Fills second — reuses title cache from settlements
         try:
             k_fills = kalshi_fetch_fills(kclient)
-            kalshi_acts.extend(kalshi_parse_fills(kclient, k_fills))
+            kalshi_acts.extend(kalshi_parse_fills(kclient, k_fills, kalshi_title_cache))
         except Exception as e:
             errors.append(f"kalshi fills: {e}")
 
