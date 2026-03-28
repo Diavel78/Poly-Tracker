@@ -749,13 +749,24 @@ def kalshi_fetch_settlements(kclient, limit=200):
 def kalshi_parse_settlements(kclient, settlements, title_cache=None):
     """Convert Kalshi settlements to closed position activity format.
 
-    Does NOT do market title lookups — uses module-level cache from prior
-    requests or ticker as fallback. Titles resolve after first load.
+    Looks up market titles with a hard cap of 20 new lookups per request.
     """
     global _kalshi_title_cache
     if title_cache is None:
         title_cache = {}
     closed = []
+
+    # Look up titles for uncached tickers (max 20 new lookups to avoid timeout)
+    lookups_done = 0
+    for s in settlements:
+        ticker = s.get("ticker", "")
+        if ticker and ticker not in _kalshi_title_cache and ticker not in title_cache:
+            if lookups_done < 20:
+                m = kalshi_fetch_market(kclient, ticker)
+                title = m.get("title", ticker)
+                title_cache[ticker] = title
+                _kalshi_title_cache[ticker] = title
+                lookups_done += 1
 
     for s in settlements:
         ticker = s.get("ticker", "")
@@ -903,24 +914,23 @@ def api_debug_kalshi():
             except Exception as e:
                 debug[name] = {"_error": str(e), "_type": type(e).__name__}
 
-        # Fills: inspect raw response
+        # Settlements
         try:
             import json as _json
             host = kclient.configuration.host
-            debug["host"] = host
-            url = f"{host}/portfolio/fills?limit=3"
+            url = f"{host}/portfolio/settlements?limit=3"
             response = kclient.call_api(
                 method='GET',
                 url=url,
                 header_params={'Accept': 'application/json'}
             )
             response.read()
-            raw_bytes = response.data
-            debug["fills_status"] = response.status
-            debug["fills_raw_type"] = str(type(raw_bytes))
-            debug["fills_raw_preview"] = str(raw_bytes[:500]) if raw_bytes else "empty"
+            raw = _json.loads(response.data.decode('utf-8'))
+            debug["settlements"] = raw
         except Exception as e:
-            debug["fills_raw"] = {"_error": str(e), "_type": type(e).__name__}
+            debug["settlements"] = {"_error": str(e), "_type": type(e).__name__}
+
+        debug["title_cache_size"] = len(_kalshi_title_cache)
 
         return jsonify(debug)
     except Exception as e:
