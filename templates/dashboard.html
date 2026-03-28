@@ -185,6 +185,29 @@
             font-size: 14px;
         }
 
+        /* --- Platform badges --- */
+        .platform-badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-right: 6px;
+            vertical-align: middle;
+            text-transform: uppercase;
+        }
+        .platform-badge.pm {
+            background: #1a3a5c;
+            color: #58a6ff;
+            border: 1px solid #264a6e;
+        }
+        .platform-badge.kalshi {
+            background: #3a2a1a;
+            color: #f0883e;
+            border: 1px solid #5c3d1e;
+        }
+
         /* --- Spinner --- */
         .spinner {
             display: inline-block;
@@ -528,7 +551,7 @@
 
             for (const p of positions) {
                 html += `<tr>
-                    <td>${esc(p.market_name.replace(/\s+\d{4}-\d{2}-\d{2}$/, ''))}${p.outcome ? ' — ' + esc(p.outcome) : ''}</td>
+                    <td>${platformBadge(p.platform)}${esc(p.market_name.replace(/\s+\d{4}-\d{2}-\d{2}$/, ''))}${p.outcome ? ' — ' + esc(p.outcome) : ''}</td>
                     <td class="right">${p.quantity.toFixed(0)}</td>
                     <td class="right">${p.entry_price !== null ? amt(p.entry_price, '$') : '--'}</td>
                     <td class="right">${p.current_price !== null ? amt(p.current_price, '$') : '--'}</td>
@@ -555,7 +578,7 @@
             for (const c of closed) {
                 html += `<tr>
                     <td>${localTime(c.timestamp)}</td>
-                    <td>${esc(c.market)}</td>
+                    <td>${platformBadge(c.platform)}${esc(c.market)}</td>
                     <td class="right">${c.quantity !== null ? c.quantity.toFixed(0) : '--'}</td>
                     <td class="right">${c.price !== null ? amt(c.price, '$') : '--'}</td>
                     <td class="right ${pnlClass(c.pnl)}">${pnlAmt(c.pnl)}</td>
@@ -581,7 +604,7 @@
             for (const a of activities) {
                 html += `<tr>
                     <td>${localTime(a.timestamp)}</td>
-                    <td>${esc(a.market)}</td>
+                    <td>${platformBadge(a.platform)}${esc(a.market)}</td>
                     <td class="right">${a.quantity !== null ? a.quantity.toFixed(0) : '--'}</td>
                     <td class="right">${a.price !== null ? amt(a.price, '$') : '--'}</td>
                     <td class="right ${pnlClass(a.pnl)}">${pnlAmt(a.pnl)}</td>
@@ -590,6 +613,12 @@
             }
             html += '</tbody></table>';
             el.innerHTML = html;
+        }
+
+        function platformBadge(platform) {
+            if (!platform) return '';
+            if (platform === 'kalshi') return '<span class="platform-badge kalshi">K</span>';
+            return '<span class="platform-badge pm">PM</span>';
         }
 
         function esc(str) {
@@ -659,7 +688,7 @@
                     const label = buildBetSlipLabel(p);
 
                     html += `<div class="betslip-item">
-                        <div class="betslip-market">${esc(label)}</div>
+                        <div class="betslip-market">${platformBadge(p.platform)}${esc(label)}</div>
                         <div class="betslip-odds ${oddsClass}">${oddsStr}</div>
                     </div>`;
                 }
