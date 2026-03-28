@@ -515,6 +515,23 @@ def parse_activities(client, activities):
 # Kalshi integration
 # ---------------------------------------------------------------------------
 
+# Module-level cache: persists between requests on same Vercel container
+_kalshi_title_cache = {}
+
+
+def _to_dict(obj):
+    """Convert SDK response objects to plain dicts recursively."""
+    if isinstance(obj, dict):
+        return {k: _to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_dict(i) for i in obj]
+    if hasattr(obj, "__dict__") and not isinstance(obj, type):
+        return {k: _to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")}
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    return obj
+
+
 def get_kalshi_client():
     """Return an authenticated Kalshi client, or None if not configured."""
     if not KALSHI_API_KEY or not KALSHI_PRIVATE_KEY:
@@ -522,6 +539,7 @@ def get_kalshi_client():
     try:
         from kalshi_python_sync import KalshiClient, Configuration
         config = Configuration()
+        config.host = "https://api.elections.kalshi.com/trade-api/v2"
         config.api_key_id = KALSHI_API_KEY
         pem = KALSHI_PRIVATE_KEY.replace("\\n", "\n")
         config.private_key_pem = pem
@@ -532,56 +550,87 @@ def get_kalshi_client():
 
 
 def kalshi_fetch_positions(kclient):
-    """Fetch open positions from Kalshi."""
+    """Fetch open positions from Kalshi using raw API."""
+    import json as _json
     try:
-        resp = kclient.get_positions(
-            settlement_status="unsettled",
-            count_filter="has_value"
+        url = f"{kclient.configuration.host}/portfolio/positions"
+        response = kclient.call_api(
+            method='GET',
+            url=url,
+            header_params={'Accept': 'application/json'}
         )
-        return resp.get("market_positions", [])
+        response.read()
+        raw = _json.loads(response.data.decode('utf-8'))
+        all_positions = raw.get("market_positions", [])
+        # Filter to positions with actual quantity
+        open_pos = []
+        for p in all_positions:
+            try:
+                qty = float(p.get("position_fp") or p.get("position") or "0")
+            except (TypeError, ValueError):
+                qty = 0
+            if abs(qty) > 0:
+                open_pos.append(p)
+        return open_pos
     except Exception as e:
         print(f"ERROR fetching Kalshi positions: {e}")
-        return []
-
-
-def kalshi_fetch_settled(kclient):
-    """Fetch settled positions from Kalshi."""
-    try:
-        resp = kclient.get_positions(
-            settlement_status="settled",
-            count_filter="has_value"
-        )
-        return resp.get("market_positions", [])
-    except Exception as e:
-        print(f"ERROR fetching Kalshi settled: {e}")
         return []
 
 
 def kalshi_fetch_balance(kclient):
     """Fetch Kalshi account balance (returns cents)."""
     try:
-        resp = kclient.get_balance()
+        resp = _to_dict(kclient.get_balance())
         return resp.get("balance", 0) / 100.0
     except Exception as e:
         print(f"ERROR fetching Kalshi balance: {e}")
         return 0.0
 
 
-def kalshi_fetch_fills(kclient, limit=500):
-    """Fetch recent fills (trades) from Kalshi."""
+def kalshi_fetch_fills(kclient, limit=100):
+    """Fetch recent fills (trades) from Kalshi using raw API.
+    Single page only to avoid timeouts.
+    """
+    import json as _json
     try:
-        resp = kclient.get_fills(limit=limit)
-        return resp.get("fills", [])
+        url = f"{kclient.configuration.host}/portfolio/fills?limit={limit}"
+        response = kclient.call_api(
+            method='GET',
+            url=url,
+            header_params={'Accept': 'application/json'}
+        )
+        response.read()
+        raw = _json.loads(response.data.decode('utf-8'))
+        return raw.get("fills", [])
     except Exception as e:
         print(f"ERROR fetching Kalshi fills: {e}")
         return []
 
 
+_kalshi_market_cache = {}
+
+
 def kalshi_fetch_market(kclient, ticker):
-    """Fetch market details for a Kalshi ticker."""
+    """Fetch market details for a Kalshi ticker. Uses module-level cache."""
+    global _kalshi_title_cache, _kalshi_market_cache
+    if ticker in _kalshi_market_cache:
+        return _kalshi_market_cache[ticker]
+
+    import json as _json
     try:
-        resp = kclient.get_market(ticker)
-        return resp.get("market", {})
+        url = f"{kclient.configuration.host}/markets/{ticker}"
+        response = kclient.call_api(
+            method='GET',
+            url=url,
+            header_params={'Accept': 'application/json'}
+        )
+        response.read()
+        raw = _json.loads(response.data.decode('utf-8'))
+        market = raw.get("market", raw)
+        if market.get("title"):
+            _kalshi_title_cache[ticker] = market["title"]
+        _kalshi_market_cache[ticker] = market
+        return market
     except Exception as e:
         print(f"ERROR fetching Kalshi market {ticker}: {e}")
         return {}
@@ -597,18 +646,31 @@ def kalshi_enrich_positions(kclient, positions):
         market_name = market.get("title", ticker)
         subtitle = market.get("subtitle", "")
 
-        # Position qty and cost
-        quantity = abs(pos.get("position", 0))
+        # Position qty — position_fp is string like "5.00"
+        try:
+            position_val = float(pos.get("position_fp") or pos.get("position") or "0")
+        except (TypeError, ValueError):
+            position_val = 0
+        quantity = abs(position_val)
         if quantity == 0:
             continue
 
-        # Kalshi prices are in cents
-        market_exposure = pos.get("market_exposure", 0) / 100.0
+        # Market exposure — market_exposure_dollars is string in dollars
+        try:
+            market_exposure = float(pos.get("market_exposure_dollars") or "0")
+        except (TypeError, ValueError):
+            market_exposure = 0
         entry_price = (market_exposure / quantity) if quantity > 0 else None
 
-        # Current price from market mid
-        yes_bid = market.get("yes_bid", 0) / 100.0
-        yes_ask = market.get("yes_ask", 0) / 100.0
+        # Current price from market — yes_bid/yes_ask may be cents or absent
+        try:
+            yes_bid = float(pos.get("yes_bid") or market.get("yes_bid") or 0) / 100.0
+        except (TypeError, ValueError):
+            yes_bid = 0
+        try:
+            yes_ask = float(pos.get("yes_ask") or market.get("yes_ask") or 0) / 100.0
+        except (TypeError, ValueError):
+            yes_ask = 0
         current_price = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
 
         current_value = quantity * current_price if current_price and quantity else None
@@ -619,12 +681,42 @@ def kalshi_enrich_positions(kclient, positions):
             pnl = current_value - market_exposure
             pnl_pct = (pnl / market_exposure) * 100
 
+        # Derive outcome label from market detail fields
+        outcome = ""
+        side_label = "YES" if position_val > 0 else "NO"
+
+        # Try yes_sub_title / no_sub_title first (most descriptive for O/U, spreads)
+        yes_sub = market.get("yes_sub_title", "") or ""
+        no_sub = market.get("no_sub_title", "") or ""
+        if position_val > 0 and yes_sub:
+            outcome = yes_sub
+        elif position_val < 0 and no_sub:
+            outcome = no_sub
+        elif yes_sub:
+            outcome = yes_sub  # default to yes side
+
+        # Fall back to subtitle
+        if not outcome and subtitle:
+            outcome = subtitle
+
+        # Fall back to parsing floor/cap from market response
+        if not outcome:
+            floor_val = market.get("floor_strike")
+            cap_val = market.get("cap_strike")
+            strike_type = market.get("strike_type", "") or ""
+            if floor_val is not None and strike_type.lower() in ("floor", "greater", "over"):
+                outcome = f"Over {floor_val}"
+            elif cap_val is not None and strike_type.lower() in ("cap", "less", "under"):
+                outcome = f"Under {cap_val}"
+            elif floor_val is not None:
+                outcome = f"Over {floor_val}"
+
         enriched.append({
             "platform": "kalshi",
             "market_name": market_name,
             "market_slug": ticker,
-            "outcome": subtitle or "",
-            "side": "YES" if pos.get("position", 0) > 0 else "NO",
+            "outcome": outcome,
+            "side": side_label,
             "quantity": quantity,
             "entry_price": entry_price,
             "current_price": current_price,
@@ -637,26 +729,48 @@ def kalshi_enrich_positions(kclient, positions):
     return enriched
 
 
-def kalshi_parse_fills(kclient, fills):
-    """Convert Kalshi fills to activity format matching Polymarket activities."""
-    # Cache market titles
-    ticker_titles = {}
+def _ticker_to_readable(ticker):
+    """Convert a Kalshi ticker like KXNCAAMBSPREAD-26MAR17DAVOKST-OKST4 to something readable.
+    Uses module-level cache if title was previously fetched."""
+    if ticker in _kalshi_title_cache:
+        return _kalshi_title_cache[ticker]
+    return ticker
+
+
+def kalshi_parse_fills(kclient, fills, title_cache=None):
+    """Convert Kalshi fills to activity format matching Polymarket activities.
+
+    Uses cached titles from settlements; does NOT do individual market lookups
+    to avoid timeouts with large fill counts.
+    """
+    if title_cache is None:
+        title_cache = {}
     parsed = []
 
     for fill in fills:
-        ticker = fill.get("ticker", "")
-        if ticker not in ticker_titles:
-            m = kalshi_fetch_market(kclient, ticker)
-            ticker_titles[ticker] = m.get("title", ticker)
+        ticker = fill.get("ticker", "") or fill.get("market_ticker", "")
 
         action = fill.get("action", "")  # "buy" or "sell"
         side = fill.get("side", "")  # "yes" or "no"
-        count = fill.get("count", 0)
-        price_cents = fill.get("yes_price", 0)
-        price = price_cents / 100.0
+
+        # count_fp is a string like "5.00"
+        count_str = fill.get("count_fp") or fill.get("count") or "0"
+        try:
+            count = float(count_str)
+        except (TypeError, ValueError):
+            count = 0
+
+        # Price: use yes/no_price_dollars (string) or fall back to fixed
+        if side == "yes":
+            price_str = fill.get("yes_price_dollars") or fill.get("yes_price_fixed") or "0"
+        else:
+            price_str = fill.get("no_price_dollars") or fill.get("no_price_fixed") or "0"
+        try:
+            price = float(price_str)
+        except (TypeError, ValueError):
+            price = 0
 
         timestamp = fill.get("created_time", "")
-        # Kalshi timestamps: "2026-03-26T03:14:50Z" → "2026-03-26 03:14:50"
         if "T" in str(timestamp):
             timestamp = str(timestamp).replace("T", " ").replace("Z", "")[:19]
 
@@ -665,7 +779,7 @@ def kalshi_parse_fills(kclient, fills):
         parsed.append({
             "platform": "kalshi",
             "timestamp": str(timestamp),
-            "market": ticker_titles.get(ticker, ticker),
+            "market": title_cache.get(ticker) or _ticker_to_readable(ticker),
             "side": side.upper() if side else "",
             "price": price,
             "quantity": count,
@@ -676,34 +790,103 @@ def kalshi_parse_fills(kclient, fills):
     return parsed
 
 
-def kalshi_parse_settled(kclient, settled_positions):
-    """Convert settled Kalshi positions to closed position activity format."""
-    closed = []
-    for pos in settled_positions:
-        ticker = pos.get("ticker", "")
-        market = kalshi_fetch_market(kclient, ticker)
-        market_name = market.get("title", ticker)
+def kalshi_fetch_settlements(kclient, limit=200):
+    """Fetch settlement history from Kalshi using raw API. Single page."""
+    import json as _json
+    try:
+        url = f"{kclient.configuration.host}/portfolio/settlements?limit={limit}"
+        response = kclient.call_api(
+            method='GET',
+            url=url,
+            header_params={'Accept': 'application/json'}
+        )
+        response.read()
+        raw = _json.loads(response.data.decode('utf-8'))
+        return raw.get("settlements", [])
+    except Exception as e:
+        print(f"ERROR fetching Kalshi settlements: {e}")
+        return []
 
-        quantity = abs(pos.get("position", 0))
+
+def kalshi_parse_settlements(kclient, settlements, title_cache=None):
+    """Convert Kalshi settlements to closed position activity format.
+
+    Looks up market titles with a hard cap of 20 new lookups per request.
+    """
+    global _kalshi_title_cache
+    if title_cache is None:
+        title_cache = {}
+    closed = []
+
+    # Look up titles for uncached tickers (max 20 new lookups to avoid timeout)
+    lookups_done = 0
+    for s in settlements:
+        ticker = s.get("ticker", "")
+        if ticker and ticker not in _kalshi_title_cache and ticker not in title_cache:
+            if lookups_done < 20:
+                m = kalshi_fetch_market(kclient, ticker)
+                title = m.get("title", ticker)
+                title_cache[ticker] = title
+                _kalshi_title_cache[ticker] = title
+                lookups_done += 1
+
+    for s in settlements:
+        ticker = s.get("ticker", "")
+        market_name = title_cache.get(ticker) or _kalshi_title_cache.get(ticker, ticker)
+
+        # Counts are strings like "5.00"
+        try:
+            yes_count = float(s.get("yes_count_fp", "0") or "0")
+        except (TypeError, ValueError):
+            yes_count = 0
+        try:
+            no_count = float(s.get("no_count_fp", "0") or "0")
+        except (TypeError, ValueError):
+            no_count = 0
+
+        # Costs are strings in dollars like "1.900000"
+        try:
+            yes_cost = float(s.get("yes_total_cost_dollars", "0") or "0")
+        except (TypeError, ValueError):
+            yes_cost = 0
+        try:
+            no_cost = float(s.get("no_total_cost_dollars", "0") or "0")
+        except (TypeError, ValueError):
+            no_cost = 0
+
+        # Revenue is in cents
+        revenue = (s.get("revenue", 0) or 0) / 100.0
+
+        try:
+            fee = float(s.get("fee_cost", "0") or "0")
+        except (TypeError, ValueError):
+            fee = 0.0
+
+        total_cost = yes_cost + no_cost
+        quantity = yes_count + no_count
+        entry_price = (total_cost / quantity) if quantity > 0 else None
+
+        # P&L = revenue - total cost - fees
+        pnl = revenue - total_cost - fee if total_cost > 0 else None
+
+        result = s.get("market_result", "")  # "yes", "no", "void"
+
+        timestamp = s.get("settled_time", "")
+        if "T" in str(timestamp):
+            timestamp = str(timestamp).replace("T", " ").replace("Z", "")[:19]
+
         if quantity == 0:
             continue
 
-        market_exposure = pos.get("market_exposure", 0) / 100.0
-        entry_price = (market_exposure / quantity) if quantity > 0 else None
-
-        settlement = pos.get("settlement_value", 0) / 100.0
-        payout = quantity * settlement
-        pnl = payout - market_exposure if market_exposure > 0 else None
-
         closed.append({
             "platform": "kalshi",
-            "timestamp": pos.get("settlement_time", ""),
+            "timestamp": str(timestamp),
             "market": market_name,
-            "side": "",
+            "side": result.upper() if result else "",
             "price": entry_price,
             "quantity": quantity,
             "type": "Position Resolution",
-            "pnl": pnl,
+            "pnl": round(pnl, 2) if pnl is not None else None,
         })
 
     return closed
@@ -764,6 +947,100 @@ def api_raw():
             raw[name] = {"_error": str(e), "_type": type(e).__name__}
 
     return jsonify(raw)
+
+
+@app.route("/api/debug-kalshi")
+@login_required
+def api_debug_kalshi():
+    """Debug: show raw Kalshi API responses."""
+    try:
+        debug = {
+            "has_api_key": bool(KALSHI_API_KEY),
+            "api_key_preview": KALSHI_API_KEY[:8] + "..." if KALSHI_API_KEY else "",
+            "has_private_key": bool(KALSHI_PRIVATE_KEY),
+            "private_key_length": len(KALSHI_PRIVATE_KEY),
+            "private_key_starts": KALSHI_PRIVATE_KEY[:30] if KALSHI_PRIVATE_KEY else "",
+        }
+
+        # Check if package can be imported
+        try:
+            import kalshi_python_sync
+            debug["package"] = "imported OK"
+            debug["package_version"] = getattr(kalshi_python_sync, "__version__", "unknown")
+        except Exception as e:
+            debug["package"] = f"IMPORT FAILED: {type(e).__name__}: {e}"
+            return jsonify(debug)
+
+        try:
+            kclient = get_kalshi_client()
+        except Exception as e:
+            debug["client"] = f"FAILED: {type(e).__name__}: {e}"
+            return jsonify(debug)
+
+        if not kclient:
+            debug["client"] = "None — credentials not detected or client creation failed"
+            return jsonify(debug)
+
+        debug["client"] = "OK"
+
+        for name, call in [
+            ("balance", lambda: kclient.get_balance()),
+        ]:
+            try:
+                debug[name] = _to_dict(call())
+            except Exception as e:
+                debug[name] = {"_error": str(e), "_type": type(e).__name__}
+
+        # Positions: use raw API (SDK crashes with Pydantic errors)
+        try:
+            import json as _json
+            url = f"{kclient.configuration.host}/portfolio/positions"
+            response = kclient.call_api(
+                method='GET',
+                url=url,
+                header_params={'Accept': 'application/json'}
+            )
+            response.read()
+            debug["positions"] = _json.loads(response.data.decode('utf-8'))
+        except Exception as e:
+            debug["positions"] = {"_error": str(e), "_type": type(e).__name__}
+
+        # Settlements
+        try:
+            import json as _json
+            host = kclient.configuration.host
+            url = f"{host}/portfolio/settlements?limit=3"
+            response = kclient.call_api(
+                method='GET',
+                url=url,
+                header_params={'Accept': 'application/json'}
+            )
+            response.read()
+            raw = _json.loads(response.data.decode('utf-8'))
+            debug["settlements"] = raw
+        except Exception as e:
+            debug["settlements"] = {"_error": str(e), "_type": type(e).__name__}
+
+        debug["title_cache_size"] = len(_kalshi_title_cache)
+        debug["market_cache_size"] = len(_kalshi_market_cache)
+
+        # Show full market detail for each open position
+        try:
+            pos_list = debug.get("positions", {}).get("market_positions", [])
+            market_details = []
+            for p in pos_list[:5]:
+                t = p.get("ticker", "")
+                qty = float(p.get("position_fp") or p.get("position") or "0")
+                if abs(qty) > 0:
+                    md = kalshi_fetch_market(kclient, t)
+                    market_details.append({"ticker": t, "market_detail": md})
+            debug["open_market_details"] = market_details
+        except Exception as e:
+            debug["open_market_details"] = {"_error": str(e)}
+
+        return jsonify(debug)
+    except Exception as e:
+        return jsonify({"fatal_error": f"{type(e).__name__}: {e}"})
 
 
 @app.route("/api/debug-markets")
@@ -854,29 +1131,36 @@ def api_data():
 
     kclient = get_kalshi_client()
     if kclient:
-        try:
-            k_positions = kalshi_fetch_positions(kclient)
-            kalshi_enriched = kalshi_enrich_positions(kclient, k_positions)
-        except Exception as e:
-            errors.append(f"kalshi positions: {e}")
+        # Shared title cache to avoid redundant market lookups across functions
+        kalshi_title_cache = {}
 
+        # Balance first (fast, no market lookups)
         try:
             kalshi_balance = kalshi_fetch_balance(kclient)
         except Exception as e:
             errors.append(f"kalshi balance: {e}")
 
+        # Open positions
         try:
-            k_fills = kalshi_fetch_fills(kclient)
-            kalshi_acts = kalshi_parse_fills(kclient, k_fills)
+            k_open = kalshi_fetch_positions(kclient)
+            kalshi_enriched = kalshi_enrich_positions(kclient, k_open)
         except Exception as e:
-            errors.append(f"kalshi fills: {e}")
+            errors.append(f"kalshi positions: {e}")
 
+        # Settlements (closed positions with P&L) — populates title cache
         try:
-            k_settled = kalshi_fetch_settled(kclient)
-            kalshi_settled_acts = kalshi_parse_settled(kclient, k_settled)
+            k_settlements = kalshi_fetch_settlements(kclient)
+            kalshi_settled_acts = kalshi_parse_settlements(kclient, k_settlements, kalshi_title_cache)
             kalshi_acts.extend(kalshi_settled_acts)
         except Exception as e:
-            errors.append(f"kalshi settled: {e}")
+            errors.append(f"kalshi settlements: {e}")
+
+        # Fills last — reuses title cache, single page only
+        try:
+            k_fills = kalshi_fetch_fills(kclient, limit=50)
+            kalshi_acts.extend(kalshi_parse_fills(kclient, k_fills, kalshi_title_cache))
+        except Exception as e:
+            errors.append(f"kalshi fills: {e}")
 
     # --- Merge ---
     all_enriched = enriched + kalshi_enriched
