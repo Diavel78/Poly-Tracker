@@ -572,24 +572,33 @@ def kalshi_fetch_fills(kclient, limit=500):
     """Fetch recent fills (trades) from Kalshi.
 
     Uses raw API call to bypass SDK Pydantic validation which crashes
-    on fills with None values for count/price fields.
+    because the API returns count_fp/no_price_dollars instead of count/yes_price.
     """
     import json as _json
+    all_fills = []
+    cursor = None
     try:
-        url = f"{kclient.configuration.host}/portfolio/fills?limit={limit}"
-        response = kclient.call_api(
-            method='GET',
-            url=url,
-            header_params={'Accept': 'application/json'}
-        )
-        response.read()
-        raw = _json.loads(response.data.decode('utf-8'))
-        fills = raw.get("fills", [])
-        # Filter out fills with missing required fields
-        return [f for f in fills if f.get("count") is not None and f.get("yes_price") is not None]
+        for _ in range(10):  # max 10 pages
+            url = f"{kclient.configuration.host}/portfolio/fills?limit={limit}"
+            if cursor:
+                url += f"&cursor={cursor}"
+            response = kclient.call_api(
+                method='GET',
+                url=url,
+                header_params={'Accept': 'application/json'}
+            )
+            response.read()
+            raw = _json.loads(response.data.decode('utf-8'))
+            fills = raw.get("fills", [])
+            if not fills:
+                break
+            all_fills.extend(fills)
+            cursor = raw.get("cursor")
+            if not cursor:
+                break
     except Exception as e:
         print(f"ERROR fetching Kalshi fills: {e}")
-        return []
+    return all_fills
 
 
 def kalshi_fetch_market(kclient, ticker):
@@ -653,25 +662,42 @@ def kalshi_enrich_positions(kclient, positions):
 
 
 def kalshi_parse_fills(kclient, fills):
-    """Convert Kalshi fills to activity format matching Polymarket activities."""
+    """Convert Kalshi fills to activity format matching Polymarket activities.
+
+    API returns: action, side, count_fp (string), no_price_dollars/yes_price_dollars (string),
+    ticker, created_time, fee_cost, etc.
+    """
     # Cache market titles
     ticker_titles = {}
     parsed = []
 
     for fill in fills:
-        ticker = fill.get("ticker", "")
-        if ticker not in ticker_titles:
+        ticker = fill.get("ticker", "") or fill.get("market_ticker", "")
+        if ticker and ticker not in ticker_titles:
             m = kalshi_fetch_market(kclient, ticker)
             ticker_titles[ticker] = m.get("title", ticker)
 
         action = fill.get("action", "")  # "buy" or "sell"
         side = fill.get("side", "")  # "yes" or "no"
-        count = fill.get("count", 0)
-        price_cents = fill.get("yes_price", 0)
-        price = price_cents / 100.0
+
+        # count_fp is a string like "5.00"
+        count_str = fill.get("count_fp") or fill.get("count") or "0"
+        try:
+            count = float(count_str)
+        except (TypeError, ValueError):
+            count = 0
+
+        # Price: use yes/no_price_dollars (string) or fall back to fixed
+        if side == "yes":
+            price_str = fill.get("yes_price_dollars") or fill.get("yes_price_fixed") or "0"
+        else:
+            price_str = fill.get("no_price_dollars") or fill.get("no_price_fixed") or "0"
+        try:
+            price = float(price_str)
+        except (TypeError, ValueError):
+            price = 0
 
         timestamp = fill.get("created_time", "")
-        # Kalshi timestamps: "2026-03-26T03:14:50Z" → "2026-03-26 03:14:50"
         if "T" in str(timestamp):
             timestamp = str(timestamp).replace("T", " ").replace("Z", "")[:19]
 
