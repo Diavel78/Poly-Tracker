@@ -603,9 +603,26 @@ def kalshi_fetch_fills(kclient, limit=500):
 
 def kalshi_fetch_market(kclient, ticker):
     """Fetch market details for a Kalshi ticker."""
+    import json as _json
     try:
+        # Try SDK first
         resp = _to_dict(kclient.get_market(ticker))
-        return resp.get("market", resp)
+        market = resp.get("market", resp)
+        if market.get("title"):
+            return market
+    except Exception:
+        pass
+    # Fall back to raw API
+    try:
+        url = f"{kclient.configuration.host}/markets/{ticker}"
+        response = kclient.call_api(
+            method='GET',
+            url=url,
+            header_params={'Accept': 'application/json'}
+        )
+        response.read()
+        raw = _json.loads(response.data.decode('utf-8'))
+        return raw.get("market", raw)
     except Exception as e:
         print(f"ERROR fetching Kalshi market {ticker}: {e}")
         return {}
