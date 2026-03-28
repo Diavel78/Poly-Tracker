@@ -535,7 +535,7 @@ def get_kalshi_client():
     try:
         from kalshi_python_sync import KalshiClient, Configuration
         config = Configuration()
-        config.host = "https://api.kalshi.com/trade-api/v2"
+        config.host = "https://api.elections.kalshi.com/trade-api/v2"
         config.api_key_id = KALSHI_API_KEY
         pem = KALSHI_PRIVATE_KEY.replace("\\n", "\n")
         config.private_key_pem = pem
