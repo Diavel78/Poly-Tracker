@@ -572,37 +572,24 @@ def kalshi_fetch_balance(kclient):
         return 0.0
 
 
-def kalshi_fetch_fills(kclient, limit=500):
-    """Fetch recent fills (trades) from Kalshi.
-
-    Uses raw API call to bypass SDK Pydantic validation which crashes
-    because the API returns count_fp/no_price_dollars instead of count/yes_price.
+def kalshi_fetch_fills(kclient, limit=100):
+    """Fetch recent fills (trades) from Kalshi using raw API.
+    Single page only to avoid timeouts.
     """
     import json as _json
-    all_fills = []
-    cursor = None
     try:
-        for _ in range(10):  # max 10 pages
-            url = f"{kclient.configuration.host}/portfolio/fills?limit={limit}"
-            if cursor:
-                url += f"&cursor={cursor}"
-            response = kclient.call_api(
-                method='GET',
-                url=url,
-                header_params={'Accept': 'application/json'}
-            )
-            response.read()
-            raw = _json.loads(response.data.decode('utf-8'))
-            fills = raw.get("fills", [])
-            if not fills:
-                break
-            all_fills.extend(fills)
-            cursor = raw.get("cursor")
-            if not cursor:
-                break
+        url = f"{kclient.configuration.host}/portfolio/fills?limit={limit}"
+        response = kclient.call_api(
+            method='GET',
+            url=url,
+            header_params={'Accept': 'application/json'}
+        )
+        response.read()
+        raw = _json.loads(response.data.decode('utf-8'))
+        return raw.get("fills", [])
     except Exception as e:
         print(f"ERROR fetching Kalshi fills: {e}")
-    return all_fills
+        return []
 
 
 def kalshi_fetch_market(kclient, ticker):
@@ -1060,18 +1047,20 @@ def api_data():
         # Shared title cache to avoid redundant market lookups across functions
         kalshi_title_cache = {}
 
+        # Balance first (fast, no market lookups)
+        try:
+            kalshi_balance = kalshi_fetch_balance(kclient)
+        except Exception as e:
+            errors.append(f"kalshi balance: {e}")
+
+        # Open positions (fast if none)
         try:
             k_open, _ = kalshi_fetch_positions(kclient)
             kalshi_enriched = kalshi_enrich_positions(kclient, k_open)
         except Exception as e:
             errors.append(f"kalshi positions: {e}")
 
-        try:
-            kalshi_balance = kalshi_fetch_balance(kclient)
-        except Exception as e:
-            errors.append(f"kalshi balance: {e}")
-
-        # Settlements first (closed positions with P&L) — populates title cache
+        # Settlements (closed positions with P&L) — populates title cache
         try:
             k_settlements = kalshi_fetch_settlements(kclient)
             kalshi_settled_acts = kalshi_parse_settlements(kclient, k_settlements, kalshi_title_cache)
@@ -1079,9 +1068,9 @@ def api_data():
         except Exception as e:
             errors.append(f"kalshi settlements: {e}")
 
-        # Fills second — reuses title cache from settlements, limit to recent
+        # Fills last — reuses title cache, single page only
         try:
-            k_fills = kalshi_fetch_fills(kclient, limit=100)
+            k_fills = kalshi_fetch_fills(kclient, limit=50)
             kalshi_acts.extend(kalshi_parse_fills(kclient, k_fills, kalshi_title_cache))
         except Exception as e:
             errors.append(f"kalshi fills: {e}")
