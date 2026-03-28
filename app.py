@@ -535,6 +535,7 @@ def get_kalshi_client():
     try:
         from kalshi_python_sync import KalshiClient, Configuration
         config = Configuration()
+        config.host = "https://api.kalshi.com/trade-api/v2"
         config.api_key_id = KALSHI_API_KEY
         pem = KALSHI_PRIVATE_KEY.replace("\\n", "\n")
         config.private_key_pem = pem
@@ -575,7 +576,7 @@ def kalshi_fetch_fills(kclient, limit=500):
     """
     import json as _json
     try:
-        url = f"{kclient.configuration.host}/trade-api/v2/portfolio/fills?limit={limit}"
+        url = f"{kclient.configuration.host}/portfolio/fills?limit={limit}"
         response = kclient.call_api(
             method='GET',
             url=url,
@@ -828,7 +829,7 @@ def api_debug_kalshi():
             import json as _json
             host = kclient.configuration.host
             debug["host"] = host
-            url = f"{host}/trade-api/v2/portfolio/fills?limit=3"
+            url = f"{host}/portfolio/fills?limit=3"
             response = kclient.call_api(
                 method='GET',
                 url=url,
