@@ -545,29 +545,16 @@ def get_kalshi_client():
 
 
 def kalshi_fetch_positions(kclient):
-    """Fetch open positions from Kalshi."""
+    """Fetch all positions from Kalshi, split into open/settled."""
     try:
-        resp = _to_dict(kclient.get_positions(
-            settlement_status="unsettled",
-            count_filter="has_value"
-        ))
-        return resp.get("market_positions", [])
+        resp = _to_dict(kclient.get_positions())
+        all_positions = resp.get("market_positions", [])
+        open_pos = [p for p in all_positions if not p.get("settlement_value") and abs(p.get("position", 0)) > 0]
+        settled_pos = [p for p in all_positions if p.get("settlement_value") is not None]
+        return open_pos, settled_pos
     except Exception as e:
         print(f"ERROR fetching Kalshi positions: {e}")
-        return []
-
-
-def kalshi_fetch_settled(kclient):
-    """Fetch settled positions from Kalshi."""
-    try:
-        resp = _to_dict(kclient.get_positions(
-            settlement_status="settled",
-            count_filter="has_value"
-        ))
-        return resp.get("market_positions", [])
-    except Exception as e:
-        print(f"ERROR fetching Kalshi settled: {e}")
-        return []
+        return [], []
 
 
 def kalshi_fetch_balance(kclient):
@@ -586,6 +573,12 @@ def kalshi_fetch_fills(kclient, limit=500):
         resp = _to_dict(kclient.get_fills(limit=limit))
         return resp.get("fills", [])
     except Exception as e:
+        # SDK may fail on fills with None fields; try without limit
+        try:
+            resp = _to_dict(kclient.get_fills())
+            return resp.get("fills", [])
+        except Exception:
+            pass
         print(f"ERROR fetching Kalshi fills: {e}")
         return []
 
@@ -815,9 +808,8 @@ def api_debug_kalshi():
 
         for name, call in [
             ("balance", lambda: kclient.get_balance()),
-            ("positions_unsettled", lambda: kclient.get_positions(settlement_status="unsettled", count_filter="has_value")),
-            ("positions_settled", lambda: kclient.get_positions(settlement_status="settled", count_filter="has_value")),
-            ("fills", lambda: kclient.get_fills(limit=5)),
+            ("positions", lambda: kclient.get_positions()),
+            ("fills", lambda: kclient.get_fills()),
         ]:
             try:
                 debug[name] = _to_dict(call())
@@ -918,8 +910,10 @@ def api_data():
     kclient = get_kalshi_client()
     if kclient:
         try:
-            k_positions = kalshi_fetch_positions(kclient)
-            kalshi_enriched = kalshi_enrich_positions(kclient, k_positions)
+            k_open, k_settled = kalshi_fetch_positions(kclient)
+            kalshi_enriched = kalshi_enrich_positions(kclient, k_open)
+            kalshi_settled_acts = kalshi_parse_settled(kclient, k_settled)
+            kalshi_acts.extend(kalshi_settled_acts)
         except Exception as e:
             errors.append(f"kalshi positions: {e}")
 
@@ -930,16 +924,9 @@ def api_data():
 
         try:
             k_fills = kalshi_fetch_fills(kclient)
-            kalshi_acts = kalshi_parse_fills(kclient, k_fills)
+            kalshi_acts.extend(kalshi_parse_fills(kclient, k_fills))
         except Exception as e:
             errors.append(f"kalshi fills: {e}")
-
-        try:
-            k_settled = kalshi_fetch_settled(kclient)
-            kalshi_settled_acts = kalshi_parse_settled(kclient, k_settled)
-            kalshi_acts.extend(kalshi_settled_acts)
-        except Exception as e:
-            errors.append(f"kalshi settled: {e}")
 
     # --- Merge ---
     all_enriched = enriched + kalshi_enriched
