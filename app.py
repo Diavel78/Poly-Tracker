@@ -286,11 +286,19 @@ def compute_summary(enriched, parsed_activities, tz_offset_minutes=0):
     yesterday_str = (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
 
     for act in parsed_activities:
-        if act["type"] == "Position Resolution" and act["pnl"] is not None:
+        has_pnl = act["pnl"] is not None
+        is_resolution = act["type"] == "Position Resolution"
+        is_trade_close = act["type"] == "Trade" and has_pnl
+
+        if is_resolution and has_pnl:
             realized_pnl += act["pnl"]
             resolved_total += 1
             if act["pnl"] > 0:
                 resolved_wins += 1
+        elif is_trade_close:
+            realized_pnl += act["pnl"]
+
+        if (is_resolution or is_trade_close) and has_pnl:
 
             # Convert activity timestamp (UTC) to client's local date
             ts = act.get("timestamp", "")
