@@ -25,6 +25,8 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 POLYMARKET_KEY_ID = os.getenv("POLYMARKET_KEY_ID", "")
 POLYMARKET_SECRET_KEY = os.getenv("POLYMARKET_SECRET_KEY", "")
+KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
+KALSHI_PRIVATE_KEY = os.getenv("KALSHI_PRIVATE_KEY", "")
 DASHBOARD_USER = os.getenv("DASHBOARD_USER", "")
 DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "")
 
@@ -233,6 +235,7 @@ def enrich_positions(client, positions):
         expired = pos.get("expired", False)
 
         enriched.append({
+            "platform": "polymarket",
             "market_name": market_name,
             "market_slug": market_slug,
             "outcome": outcome,
@@ -456,6 +459,7 @@ def parse_activities(client, activities):
             timestamp = str(timestamp).replace("T", " ")[:19]
 
         parsed.append({
+            "platform": "polymarket",
             "timestamp": str(timestamp),
             "market": str(market) or market_slug,
             "_market_slug": market_slug,
@@ -505,6 +509,204 @@ def parse_activities(client, activities):
         act.pop("_is_close", None)
 
     return parsed
+
+
+# ---------------------------------------------------------------------------
+# Kalshi integration
+# ---------------------------------------------------------------------------
+
+def get_kalshi_client():
+    """Return an authenticated Kalshi client, or None if not configured."""
+    if not KALSHI_API_KEY or not KALSHI_PRIVATE_KEY:
+        return None
+    try:
+        from kalshi_python_sync import KalshiClient, Configuration
+        config = Configuration()
+        config.api_key_id = KALSHI_API_KEY
+        pem = KALSHI_PRIVATE_KEY.replace("\\n", "\n")
+        config.private_key_pem = pem
+        return KalshiClient(configuration=config)
+    except Exception as e:
+        print(f"ERROR creating Kalshi client: {e}")
+        return None
+
+
+def kalshi_fetch_positions(kclient):
+    """Fetch open positions from Kalshi."""
+    try:
+        resp = kclient.get_positions(
+            settlement_status="unsettled",
+            count_filter="has_value"
+        )
+        return resp.get("market_positions", [])
+    except Exception as e:
+        print(f"ERROR fetching Kalshi positions: {e}")
+        return []
+
+
+def kalshi_fetch_settled(kclient):
+    """Fetch settled positions from Kalshi."""
+    try:
+        resp = kclient.get_positions(
+            settlement_status="settled",
+            count_filter="has_value"
+        )
+        return resp.get("market_positions", [])
+    except Exception as e:
+        print(f"ERROR fetching Kalshi settled: {e}")
+        return []
+
+
+def kalshi_fetch_balance(kclient):
+    """Fetch Kalshi account balance (returns cents)."""
+    try:
+        resp = kclient.get_balance()
+        return resp.get("balance", 0) / 100.0
+    except Exception as e:
+        print(f"ERROR fetching Kalshi balance: {e}")
+        return 0.0
+
+
+def kalshi_fetch_fills(kclient, limit=500):
+    """Fetch recent fills (trades) from Kalshi."""
+    try:
+        resp = kclient.get_fills(limit=limit)
+        return resp.get("fills", [])
+    except Exception as e:
+        print(f"ERROR fetching Kalshi fills: {e}")
+        return []
+
+
+def kalshi_fetch_market(kclient, ticker):
+    """Fetch market details for a Kalshi ticker."""
+    try:
+        resp = kclient.get_market(ticker)
+        return resp.get("market", {})
+    except Exception as e:
+        print(f"ERROR fetching Kalshi market {ticker}: {e}")
+        return {}
+
+
+def kalshi_enrich_positions(kclient, positions):
+    """Convert Kalshi positions to the same enriched format as Polymarket."""
+    enriched = []
+    for pos in positions:
+        ticker = pos.get("ticker", "")
+        market = kalshi_fetch_market(kclient, ticker)
+
+        market_name = market.get("title", ticker)
+        subtitle = market.get("subtitle", "")
+
+        # Position qty and cost
+        quantity = abs(pos.get("position", 0))
+        if quantity == 0:
+            continue
+
+        # Kalshi prices are in cents
+        market_exposure = pos.get("market_exposure", 0) / 100.0
+        entry_price = (market_exposure / quantity) if quantity > 0 else None
+
+        # Current price from market mid
+        yes_bid = market.get("yes_bid", 0) / 100.0
+        yes_ask = market.get("yes_ask", 0) / 100.0
+        current_price = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
+
+        current_value = quantity * current_price if current_price and quantity else None
+
+        pnl = None
+        pnl_pct = None
+        if current_value is not None and market_exposure > 0:
+            pnl = current_value - market_exposure
+            pnl_pct = (pnl / market_exposure) * 100
+
+        enriched.append({
+            "platform": "kalshi",
+            "market_name": market_name,
+            "market_slug": ticker,
+            "outcome": subtitle or "",
+            "side": "YES" if pos.get("position", 0) > 0 else "NO",
+            "quantity": quantity,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "current_value": current_value,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
+            "expired": False,
+        })
+
+    return enriched
+
+
+def kalshi_parse_fills(kclient, fills):
+    """Convert Kalshi fills to activity format matching Polymarket activities."""
+    # Cache market titles
+    ticker_titles = {}
+    parsed = []
+
+    for fill in fills:
+        ticker = fill.get("ticker", "")
+        if ticker not in ticker_titles:
+            m = kalshi_fetch_market(kclient, ticker)
+            ticker_titles[ticker] = m.get("title", ticker)
+
+        action = fill.get("action", "")  # "buy" or "sell"
+        side = fill.get("side", "")  # "yes" or "no"
+        count = fill.get("count", 0)
+        price_cents = fill.get("yes_price", 0)
+        price = price_cents / 100.0
+
+        timestamp = fill.get("created_time", "")
+        # Kalshi timestamps: "2026-03-26T03:14:50Z" → "2026-03-26 03:14:50"
+        if "T" in str(timestamp):
+            timestamp = str(timestamp).replace("T", " ").replace("Z", "")[:19]
+
+        label = f"{action.title()} {side.upper()}" if action and side else "Trade"
+
+        parsed.append({
+            "platform": "kalshi",
+            "timestamp": str(timestamp),
+            "market": ticker_titles.get(ticker, ticker),
+            "side": side.upper() if side else "",
+            "price": price,
+            "quantity": count,
+            "type": label,
+            "pnl": None,
+        })
+
+    return parsed
+
+
+def kalshi_parse_settled(kclient, settled_positions):
+    """Convert settled Kalshi positions to closed position activity format."""
+    closed = []
+    for pos in settled_positions:
+        ticker = pos.get("ticker", "")
+        market = kalshi_fetch_market(kclient, ticker)
+        market_name = market.get("title", ticker)
+
+        quantity = abs(pos.get("position", 0))
+        if quantity == 0:
+            continue
+
+        market_exposure = pos.get("market_exposure", 0) / 100.0
+        entry_price = (market_exposure / quantity) if quantity > 0 else None
+
+        settlement = pos.get("settlement_value", 0) / 100.0
+        payout = quantity * settlement
+        pnl = payout - market_exposure if market_exposure > 0 else None
+
+        closed.append({
+            "platform": "kalshi",
+            "timestamp": pos.get("settlement_time", ""),
+            "market": market_name,
+            "side": "",
+            "price": entry_price,
+            "quantity": quantity,
+            "type": "Position Resolution",
+            "pnl": pnl,
+        })
+
+    return closed
 
 
 # ---------------------------------------------------------------------------
@@ -598,68 +800,110 @@ def api_debug_markets():
 @app.route("/api/data")
 @login_required
 def api_data():
-    """JSON endpoint that fetches all Polymarket data for the dashboard."""
+    """JSON endpoint that fetches all platform data for the dashboard."""
     errors = []
-    try:
-        client = get_client()
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"Client init failed: {e}"}), 500
-
     now = datetime.now(timezone.utc)
 
-    positions = []
-    try:
-        positions = fetch_positions(client)
-    except Exception as e:
-        errors.append(f"positions: {e}")
-
+    # --- Polymarket ---
     enriched = []
-    try:
-        enriched = enrich_positions(client, positions)
-    except Exception as e:
-        errors.append(f"enrich: {e}")
+    parsed_acts = []
+    pm_balance = 0.0
+    positions = []
 
-    activities = []
     try:
-        activities = fetch_activities(client)
-    except Exception as e:
-        errors.append(f"activities: {e}")
+        client = get_client()
 
-    balances = None
-    try:
-        balances = fetch_balances(client)
-    except Exception as e:
-        errors.append(f"balances: {e}")
+        try:
+            positions = fetch_positions(client)
+        except Exception as e:
+            errors.append(f"pm positions: {e}")
 
-    parsed_acts = parse_activities(client, activities)
+        try:
+            enriched = enrich_positions(client, positions)
+        except Exception as e:
+            errors.append(f"pm enrich: {e}")
+
+        activities = []
+        try:
+            activities = fetch_activities(client)
+        except Exception as e:
+            errors.append(f"pm activities: {e}")
+
+        balances = None
+        try:
+            balances = fetch_balances(client)
+        except Exception as e:
+            errors.append(f"pm balances: {e}")
+
+        parsed_acts = parse_activities(client, activities)
+        bal = parse_balances(balances)
+        pm_balance = bal.get("current_balance") or 0.0
+
+    except Exception as e:
+        errors.append(f"pm client: {e}")
+        bal = {}
 
     # Exclude activity before 2026-03-01 (prior data was arb trading, not legit bets)
     CUTOFF_DATE = "2026-03-01"
     parsed_acts = [a for a in parsed_acts if a.get("timestamp", "") >= CUTOFF_DATE]
 
-    # Separate open vs closed positions
-    open_positions = [p for p in enriched if not p.get("expired")]
-    closed_positions = [a for a in parsed_acts if a["type"] == "Position Resolution"]
+    # --- Kalshi ---
+    kalshi_enriched = []
+    kalshi_acts = []
+    kalshi_balance = 0.0
+
+    kclient = get_kalshi_client()
+    if kclient:
+        try:
+            k_positions = kalshi_fetch_positions(kclient)
+            kalshi_enriched = kalshi_enrich_positions(kclient, k_positions)
+        except Exception as e:
+            errors.append(f"kalshi positions: {e}")
+
+        try:
+            kalshi_balance = kalshi_fetch_balance(kclient)
+        except Exception as e:
+            errors.append(f"kalshi balance: {e}")
+
+        try:
+            k_fills = kalshi_fetch_fills(kclient)
+            kalshi_acts = kalshi_parse_fills(kclient, k_fills)
+        except Exception as e:
+            errors.append(f"kalshi fills: {e}")
+
+        try:
+            k_settled = kalshi_fetch_settled(kclient)
+            kalshi_settled_acts = kalshi_parse_settled(kclient, k_settled)
+            kalshi_acts.extend(kalshi_settled_acts)
+        except Exception as e:
+            errors.append(f"kalshi settled: {e}")
+
+    # --- Merge ---
+    all_enriched = enriched + kalshi_enriched
+    all_activities = parsed_acts + kalshi_acts
+    all_activities.sort(key=lambda a: a.get("timestamp", ""), reverse=True)
+
+    total_balance = pm_balance + kalshi_balance
+
+    open_positions = [p for p in all_enriched if not p.get("expired")]
+    closed_positions = [a for a in all_activities if a["type"] == "Position Resolution"]
 
     tz_offset = request.args.get("tz", 0, type=int)
-    summary = compute_summary(enriched, parsed_acts, tz_offset_minutes=tz_offset)
+    summary = compute_summary(all_enriched, all_activities, tz_offset_minutes=tz_offset)
 
     return jsonify({
         "ok": True,
         "timestamp": now.isoformat(),
         "positions": open_positions,
         "closed_positions": closed_positions,
-        "activities": parsed_acts,
-        "balances": parse_balances(balances),
+        "activities": all_activities,
+        "balances": {
+            "current_balance": total_balance,
+            "polymarket_balance": pm_balance,
+            "kalshi_balance": kalshi_balance,
+        },
         "summary": summary,
         "errors": errors,
-        "debug": {
-            "raw_positions_count": len(positions),
-            "enriched_count": len(enriched),
-            "raw_activities_count": len(activities),
-            "balances_type": type(balances).__name__ if balances else "None",
-            "has_credentials": bool(POLYMARKET_KEY_ID and POLYMARKET_SECRET_KEY),
-        },
     })
 
 

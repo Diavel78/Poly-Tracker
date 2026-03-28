@@ -1,18 +1,19 @@
 # Poly-Tracker
 
-Polymarket US position tracker — a Flask web dashboard deployed on Vercel that displays live betting positions, P&L, and trade history from the Polymarket US sports betting platform.
+Multi-platform sports betting position tracker — a Flask web dashboard deployed on Vercel that displays live betting positions, P&L, and trade history from both Polymarket US and Kalshi.
 
 ## Architecture
 
 - **Backend**: `app.py` — single-file Flask app, deployed as a Vercel serverless function
 - **Frontend**: `templates/dashboard.html` — single-page app with inline CSS/JS, fetches data from `/api/data` via AJAX
 - **Login**: `templates/login.html` — simple session-based auth (username/password from env vars)
-- **SDK**: `polymarket-us` pip package — authenticates with API key/secret to fetch positions, balances, activities, and market data
+- **SDKs**: `polymarket-us` pip package for Polymarket; `kalshi_python_sync` for Kalshi (RSA-PSS auth)
+- **Multi-platform**: Positions, activities, and balances merged from both platforms with platform badges (PM/K)
 - **Deployment**: Vercel via `vercel.json`, env vars configured in Vercel dashboard
 
 ## Key Files
 
-- `app.py` — All backend logic: SDK client, data fetching, enrichment, routes
+- `app.py` — All backend logic: SDK clients, data fetching, enrichment, routes
 - `templates/dashboard.html` — Full dashboard UI (stats cards, positions table, closed positions, activity log, bet slip modal, dark/light theme)
 - `templates/login.html` — Login page
 - `.env.example` — Required environment variables
@@ -28,9 +29,16 @@ Polymarket US position tracker — a Flask web dashboard deployed on Vercel that
    - `client.account.balances()` → account balance
    - `client.markets.retrieve_by_slug(slug)` → full market detail (used for line/spread info)
    - `client.markets.bbo(slug)` → best bid/offer for current price
-3. `enrich_positions()` processes raw positions into display-ready data with pick labels, odds, P&L
+3. `enrich_positions()` processes raw Polymarket positions into display-ready data with pick labels, odds, P&L
 4. `parse_activities()` processes activity history for closed positions and trade log
-5. JSON response returned to frontend, which renders everything client-side
+5. If Kalshi credentials are set, also fetches via `kalshi_python_sync`:
+   - `get_positions()` → open/settled positions
+   - `get_fills()` → trade history
+   - `get_balance()` → account balance in cents
+   - `get_market(ticker)` → market details for enrichment
+6. `kalshi_enrich_positions()` and `kalshi_parse_fills()` convert Kalshi data to same format as Polymarket
+7. All positions/activities merged, sorted by timestamp, returned with `"platform"` field ("polymarket" or "kalshi")
+8. JSON response returned to frontend, which renders everything client-side with platform badges
 
 ## Pick Label Logic (enrich_positions)
 
@@ -50,6 +58,7 @@ Modal overlay showing current open positions in a shareable sportsbook-ticket fo
 - Trailing dates stripped from event titles (regex: `\s+\d{4}-\d{2}-\d{2}$`)
 - American odds converted from entry price (implied probability) via `probToAmericanOdds()`
 - No YES/NO side labels — the pick itself tells the story
+- Platform badges (PM/K) shown next to each position
 
 ## Dashboard Features
 
@@ -57,7 +66,7 @@ Modal overlay showing current open positions in a shareable sportsbook-ticket fo
 - **Open Positions table**: Market — Pick, Qty, Entry, Current, P&L, Return %
 - **Closed Positions tab**: Resolved bets with outcome and P&L
 - **All Activity tab**: Full trade + resolution + balance change history
-- **Dark/Light theme toggle**: persisted in localStorage
+- **Platform badges**: Blue "PM" for Polymarket, orange "K" for Kalshi on all positions/activities
 - **Auto-refresh**: polls `/api/data` every 60 seconds
 - **Activity cutoff**: filters out activity before 2026-03-01 (prior arb trading data excluded)
 
@@ -67,6 +76,8 @@ Modal overlay showing current open positions in a shareable sportsbook-ticket fo
 |---|---|
 | `POLYMARKET_KEY_ID` | Polymarket US API key ID (UUID) |
 | `POLYMARKET_SECRET_KEY` | Polymarket US API secret (base64 ed25519 private key) |
+| `KALSHI_API_KEY` | Kalshi API key ID (optional — enables Kalshi integration) |
+| `KALSHI_PRIVATE_KEY` | Kalshi RSA private key in PEM format (use `\n` for newlines in env var) |
 | `DASHBOARD_USER` | Login username |
 | `DASHBOARD_PASS` | Login password |
 | `FLASK_SECRET_KEY` | Flask session secret (auto-generated if not set) |
@@ -77,7 +88,7 @@ Modal overlay showing current open positions in a shareable sportsbook-ticket fo
 - `/api/raw` — Dumps raw SDK responses (positions, balances, activities)
 - `/api/debug-markets` — Shows raw `marketMetadata` + full `MarketDetail` for each open position
 
-## SDK Types Reference
+## Polymarket SDK Types Reference
 
 Key types from `polymarket_us` (in `polymarket_us.types`):
 - `MarketMetadata`: `slug`, `icon`, `title`, `outcome`, `eventSlug`, `teamId`, `team`
@@ -90,6 +101,14 @@ Key types from `polymarket_us` (in `polymarket_us.types`):
 - **MarketDetail.question**: Contains line descriptions (e.g., "Spread: BOS Bruins (+1.5)", "Total: Over/Under 6.5"). Use regex to extract totals for O/U picks.
 - **Timestamps**: Activity timestamps are UTC with space separator (e.g., "2026-03-26 03:14:50"). Normalize to "T" separator before `fromisoformat()`. Always convert to client timezone for today/yesterday P&L boundaries.
 
+## Kalshi SDK Reference
+
+- **Auth**: RSA-PSS signature via `kalshi_python_sync`. Client configured with `Configuration()` setting `api_key_id` and `private_key_pem` (PEM string with `\n` replaced to real newlines).
+- **Prices**: Kalshi uses cents (0-100). Divide by 100 for dollar amounts. Balance also in cents.
+- **Fills**: Each fill has explicit `side` ("yes"/"no") and `action` ("buy"/"sell") fields — much cleaner than Polymarket's inferred buy/sell.
+- **Positions**: `get_positions()` returns list with `ticker`, `position` (qty), `market_exposure`, `resting_orders_count`. Settlement via `settlement_value`.
+- **Markets**: `get_market(ticker)` returns `title`, `event_ticker`, `subtitle`, `yes_bid`/`yes_ask`/`no_bid`/`no_ask` for pricing.
+
 ## Common Tasks
 
 - **Add a new stats card**: Add HTML in dashboard.html stat-grid section, populate in `renderDashboard()`
@@ -97,3 +116,4 @@ Key types from `polymarket_us` (in `polymarket_us.types`):
 - **Modify pick label logic**: Edit `enrich_positions()` in app.py (priority chain for outcome derivation)
 - **Add new data source**: Add fetch function in app.py, call it in `api_data()`, pass to frontend via JSON
 - **Change activity cutoff date**: Edit `CUTOFF_DATE` in `api_data()` route
+- **Add new platform**: Follow Kalshi pattern — add client setup, fetch functions, enrich/parse functions, merge in `api_data()`
