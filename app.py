@@ -662,16 +662,47 @@ def kalshi_enrich_positions(kclient, positions):
             market_exposure = 0
         entry_price = (market_exposure / quantity) if quantity > 0 else None
 
-        # Current price from market — yes_bid/yes_ask may be cents or absent
+        # Current price from market detail
+        # Kalshi API returns prices in cents (0-100) in yes_bid/yes_ask fields
+        # Also check last_price, previous_yes_bid/ask as fallbacks
+        current_price = None
         try:
-            yes_bid = float(pos.get("yes_bid") or market.get("yes_bid") or 0) / 100.0
+            # Try yes_bid/yes_ask from market detail (cents)
+            yes_bid = market.get("yes_bid")
+            yes_ask = market.get("yes_ask")
+            if yes_bid is not None and yes_ask is not None:
+                yb = float(yes_bid) / 100.0
+                ya = float(yes_ask) / 100.0
+                if yb + ya > 0:
+                    current_price = (yb + ya) / 2
+
+            # Fallback: last_price (cents)
+            if current_price is None:
+                lp = market.get("last_price")
+                if lp is not None and float(lp) > 0:
+                    current_price = float(lp) / 100.0
+
+            # Fallback: previous_yes_bid / previous_yes_ask (cents)
+            if current_price is None:
+                pyb = market.get("previous_yes_bid")
+                pya = market.get("previous_yes_ask")
+                if pyb is not None and pya is not None:
+                    pyb_f = float(pyb) / 100.0
+                    pya_f = float(pya) / 100.0
+                    if pyb_f + pya_f > 0:
+                        current_price = (pyb_f + pya_f) / 2
+
+            # Fallback: yes_bid/yes_ask from position dict itself
+            if current_price is None:
+                pb = pos.get("yes_bid")
+                pa = pos.get("yes_ask")
+                if pb is not None and pa is not None:
+                    pb_f = float(pb) / 100.0
+                    pa_f = float(pa) / 100.0
+                    if pb_f + pa_f > 0:
+                        current_price = (pb_f + pa_f) / 2
         except (TypeError, ValueError):
-            yes_bid = 0
-        try:
-            yes_ask = float(pos.get("yes_ask") or market.get("yes_ask") or 0) / 100.0
-        except (TypeError, ValueError):
-            yes_ask = 0
-        current_price = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
+            current_price = None
 
         current_value = quantity * current_price if current_price and quantity else None
 
