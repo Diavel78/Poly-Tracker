@@ -943,12 +943,25 @@ def api_debug_kalshi():
 
         for name, call in [
             ("balance", lambda: kclient.get_balance()),
-            ("positions", lambda: kclient.get_positions()),
         ]:
             try:
                 debug[name] = _to_dict(call())
             except Exception as e:
                 debug[name] = {"_error": str(e), "_type": type(e).__name__}
+
+        # Positions: use raw API (SDK crashes with Pydantic errors)
+        try:
+            import json as _json
+            url = f"{kclient.configuration.host}/portfolio/positions"
+            response = kclient.call_api(
+                method='GET',
+                url=url,
+                header_params={'Accept': 'application/json'}
+            )
+            response.read()
+            debug["positions"] = _json.loads(response.data.decode('utf-8'))
+        except Exception as e:
+            debug["positions"] = {"_error": str(e), "_type": type(e).__name__}
 
         # Settlements
         try:
