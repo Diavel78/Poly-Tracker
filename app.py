@@ -734,34 +734,96 @@ def kalshi_parse_fills(kclient, fills):
     return parsed
 
 
-def kalshi_parse_settled(kclient, settled_positions):
-    """Convert settled Kalshi positions to closed position activity format."""
-    closed = []
-    for pos in settled_positions:
-        ticker = pos.get("ticker", "")
-        market = kalshi_fetch_market(kclient, ticker)
-        market_name = market.get("title", ticker)
+def kalshi_fetch_settlements(kclient, limit=200):
+    """Fetch settlement history from Kalshi using raw API.
 
-        quantity = abs(pos.get("position", 0))
+    Returns list of settlement dicts with: ticker, event_ticker, market_result,
+    yes_count, yes_total_cost, no_count, no_total_cost, revenue, settled_time,
+    fee_cost, value.
+    """
+    import json as _json
+    all_settlements = []
+    cursor = None
+    try:
+        for _ in range(10):
+            url = f"{kclient.configuration.host}/portfolio/settlements?limit={limit}"
+            if cursor:
+                url += f"&cursor={cursor}"
+            response = kclient.call_api(
+                method='GET',
+                url=url,
+                header_params={'Accept': 'application/json'}
+            )
+            response.read()
+            raw = _json.loads(response.data.decode('utf-8'))
+            settlements = raw.get("settlements", [])
+            if not settlements:
+                break
+            all_settlements.extend(settlements)
+            cursor = raw.get("cursor")
+            if not cursor:
+                break
+    except Exception as e:
+        print(f"ERROR fetching Kalshi settlements: {e}")
+    return all_settlements
+
+
+def kalshi_parse_settlements(kclient, settlements):
+    """Convert Kalshi settlements to closed position activity format.
+
+    Each settlement has: ticker, market_result (yes/no/void), yes_count,
+    yes_total_cost, no_count, no_total_cost, revenue (all in cents),
+    settled_time, fee_cost (string dollars).
+    """
+    # Cache market titles
+    ticker_titles = {}
+    closed = []
+
+    for s in settlements:
+        ticker = s.get("ticker", "")
+        if ticker and ticker not in ticker_titles:
+            m = kalshi_fetch_market(kclient, ticker)
+            ticker_titles[ticker] = m.get("title", ticker)
+
+        market_name = ticker_titles.get(ticker, ticker)
+
+        yes_count = s.get("yes_count", 0) or 0
+        no_count = s.get("no_count", 0) or 0
+        yes_cost = (s.get("yes_total_cost", 0) or 0) / 100.0
+        no_cost = (s.get("no_total_cost", 0) or 0) / 100.0
+        revenue = (s.get("revenue", 0) or 0) / 100.0
+
+        # Fee cost is a string in dollars
+        try:
+            fee = float(s.get("fee_cost", "0") or "0")
+        except (TypeError, ValueError):
+            fee = 0.0
+
+        total_cost = yes_cost + no_cost
+        quantity = yes_count + no_count
+        entry_price = (total_cost / quantity) if quantity > 0 else None
+
+        # P&L = revenue - total cost - fees
+        pnl = revenue - total_cost - fee if total_cost > 0 else None
+
+        result = s.get("market_result", "")  # "yes", "no", "void"
+
+        timestamp = s.get("settled_time", "")
+        if "T" in str(timestamp):
+            timestamp = str(timestamp).replace("T", " ").replace("Z", "")[:19]
+
         if quantity == 0:
             continue
 
-        market_exposure = pos.get("market_exposure", 0) / 100.0
-        entry_price = (market_exposure / quantity) if quantity > 0 else None
-
-        settlement = pos.get("settlement_value", 0) / 100.0
-        payout = quantity * settlement
-        pnl = payout - market_exposure if market_exposure > 0 else None
-
         closed.append({
             "platform": "kalshi",
-            "timestamp": pos.get("settlement_time", ""),
+            "timestamp": str(timestamp),
             "market": market_name,
-            "side": "",
+            "side": result.upper() if result else "",
             "price": entry_price,
             "quantity": quantity,
             "type": "Position Resolution",
-            "pnl": pnl,
+            "pnl": round(pnl, 2) if pnl is not None else None,
         })
 
     return closed
@@ -980,12 +1042,17 @@ def api_data():
     kclient = get_kalshi_client()
     if kclient:
         try:
-            k_open, k_settled = kalshi_fetch_positions(kclient)
+            k_open, _ = kalshi_fetch_positions(kclient)
             kalshi_enriched = kalshi_enrich_positions(kclient, k_open)
-            kalshi_settled_acts = kalshi_parse_settled(kclient, k_settled)
-            kalshi_acts.extend(kalshi_settled_acts)
         except Exception as e:
             errors.append(f"kalshi positions: {e}")
+
+        try:
+            k_settlements = kalshi_fetch_settlements(kclient)
+            kalshi_settled_acts = kalshi_parse_settlements(kclient, k_settlements)
+            kalshi_acts.extend(kalshi_settled_acts)
+        except Exception as e:
+            errors.append(f"kalshi settlements: {e}")
 
         try:
             kalshi_balance = kalshi_fetch_balance(kclient)
