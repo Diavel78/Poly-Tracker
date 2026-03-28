@@ -515,6 +515,19 @@ def parse_activities(client, activities):
 # Kalshi integration
 # ---------------------------------------------------------------------------
 
+def _to_dict(obj):
+    """Convert SDK response objects to plain dicts recursively."""
+    if isinstance(obj, dict):
+        return {k: _to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_dict(i) for i in obj]
+    if hasattr(obj, "__dict__") and not isinstance(obj, type):
+        return {k: _to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")}
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    return obj
+
+
 def get_kalshi_client():
     """Return an authenticated Kalshi client, or None if not configured."""
     if not KALSHI_API_KEY or not KALSHI_PRIVATE_KEY:
@@ -534,10 +547,10 @@ def get_kalshi_client():
 def kalshi_fetch_positions(kclient):
     """Fetch open positions from Kalshi."""
     try:
-        resp = kclient.get_positions(
+        resp = _to_dict(kclient.get_positions(
             settlement_status="unsettled",
             count_filter="has_value"
-        )
+        ))
         return resp.get("market_positions", [])
     except Exception as e:
         print(f"ERROR fetching Kalshi positions: {e}")
@@ -547,10 +560,10 @@ def kalshi_fetch_positions(kclient):
 def kalshi_fetch_settled(kclient):
     """Fetch settled positions from Kalshi."""
     try:
-        resp = kclient.get_positions(
+        resp = _to_dict(kclient.get_positions(
             settlement_status="settled",
             count_filter="has_value"
-        )
+        ))
         return resp.get("market_positions", [])
     except Exception as e:
         print(f"ERROR fetching Kalshi settled: {e}")
@@ -560,7 +573,7 @@ def kalshi_fetch_settled(kclient):
 def kalshi_fetch_balance(kclient):
     """Fetch Kalshi account balance (returns cents)."""
     try:
-        resp = kclient.get_balance()
+        resp = _to_dict(kclient.get_balance())
         return resp.get("balance", 0) / 100.0
     except Exception as e:
         print(f"ERROR fetching Kalshi balance: {e}")
@@ -570,7 +583,7 @@ def kalshi_fetch_balance(kclient):
 def kalshi_fetch_fills(kclient, limit=500):
     """Fetch recent fills (trades) from Kalshi."""
     try:
-        resp = kclient.get_fills(limit=limit)
+        resp = _to_dict(kclient.get_fills(limit=limit))
         return resp.get("fills", [])
     except Exception as e:
         print(f"ERROR fetching Kalshi fills: {e}")
@@ -580,8 +593,8 @@ def kalshi_fetch_fills(kclient, limit=500):
 def kalshi_fetch_market(kclient, ticker):
     """Fetch market details for a Kalshi ticker."""
     try:
-        resp = kclient.get_market(ticker)
-        return resp.get("market", {})
+        resp = _to_dict(kclient.get_market(ticker))
+        return resp.get("market", resp)
     except Exception as e:
         print(f"ERROR fetching Kalshi market {ticker}: {e}")
         return {}
@@ -807,7 +820,7 @@ def api_debug_kalshi():
             ("fills", lambda: kclient.get_fills(limit=5)),
         ]:
             try:
-                debug[name] = call()
+                debug[name] = _to_dict(call())
             except Exception as e:
                 debug[name] = {"_error": str(e), "_type": type(e).__name__}
 
