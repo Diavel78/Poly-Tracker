@@ -607,11 +607,14 @@ def kalshi_fetch_fills(kclient, limit=100):
         return []
 
 
+_kalshi_market_cache = {}
+
+
 def kalshi_fetch_market(kclient, ticker):
     """Fetch market details for a Kalshi ticker. Uses module-level cache."""
-    global _kalshi_title_cache
-    if ticker in _kalshi_title_cache:
-        return {"title": _kalshi_title_cache[ticker]}
+    global _kalshi_title_cache, _kalshi_market_cache
+    if ticker in _kalshi_market_cache:
+        return _kalshi_market_cache[ticker]
 
     import json as _json
     try:
@@ -626,6 +629,7 @@ def kalshi_fetch_market(kclient, ticker):
         market = raw.get("market", raw)
         if market.get("title"):
             _kalshi_title_cache[ticker] = market["title"]
+        _kalshi_market_cache[ticker] = market
         return market
     except Exception as e:
         print(f"ERROR fetching Kalshi market {ticker}: {e}")
@@ -677,12 +681,42 @@ def kalshi_enrich_positions(kclient, positions):
             pnl = current_value - market_exposure
             pnl_pct = (pnl / market_exposure) * 100
 
+        # Derive outcome label from market detail fields
+        outcome = ""
+        side_label = "YES" if position_val > 0 else "NO"
+
+        # Try yes_sub_title / no_sub_title first (most descriptive for O/U, spreads)
+        yes_sub = market.get("yes_sub_title", "") or ""
+        no_sub = market.get("no_sub_title", "") or ""
+        if position_val > 0 and yes_sub:
+            outcome = yes_sub
+        elif position_val < 0 and no_sub:
+            outcome = no_sub
+        elif yes_sub:
+            outcome = yes_sub  # default to yes side
+
+        # Fall back to subtitle
+        if not outcome and subtitle:
+            outcome = subtitle
+
+        # Fall back to parsing floor/cap from market response
+        if not outcome:
+            floor_val = market.get("floor_strike")
+            cap_val = market.get("cap_strike")
+            strike_type = market.get("strike_type", "") or ""
+            if floor_val is not None and strike_type.lower() in ("floor", "greater", "over"):
+                outcome = f"Over {floor_val}"
+            elif cap_val is not None and strike_type.lower() in ("cap", "less", "under"):
+                outcome = f"Under {cap_val}"
+            elif floor_val is not None:
+                outcome = f"Over {floor_val}"
+
         enriched.append({
             "platform": "kalshi",
             "market_name": market_name,
             "market_slug": ticker,
-            "outcome": subtitle or "",
-            "side": "YES" if position_val > 0 else "NO",
+            "outcome": outcome,
+            "side": side_label,
             "quantity": quantity,
             "entry_price": entry_price,
             "current_price": current_price,
@@ -988,6 +1022,21 @@ def api_debug_kalshi():
             debug["settlements"] = {"_error": str(e), "_type": type(e).__name__}
 
         debug["title_cache_size"] = len(_kalshi_title_cache)
+        debug["market_cache_size"] = len(_kalshi_market_cache)
+
+        # Show full market detail for each open position
+        try:
+            pos_list = debug.get("positions", {}).get("market_positions", [])
+            market_details = []
+            for p in pos_list[:5]:
+                t = p.get("ticker", "")
+                qty = float(p.get("position_fp") or p.get("position") or "0")
+                if abs(qty) > 0:
+                    md = kalshi_fetch_market(kclient, t)
+                    market_details.append({"ticker": t, "market_detail": md})
+            debug["open_market_details"] = market_details
+        except Exception as e:
+            debug["open_market_details"] = {"_error": str(e)}
 
         return jsonify(debug)
     except Exception as e:

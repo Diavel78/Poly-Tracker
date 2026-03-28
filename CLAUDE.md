@@ -31,13 +31,12 @@ Multi-platform sports betting position tracker — a Flask web dashboard deploye
    - `client.markets.bbo(slug)` → best bid/offer for current price
 3. `enrich_positions()` processes raw Polymarket positions into display-ready data with pick labels, odds, P&L
 4. `parse_activities()` processes activity history for closed positions and trade log
-5. If Kalshi credentials are set, also fetches via `kalshi_python_sync` and raw API:
-   - `get_positions()` → open positions (SDK)
-   - `get_balance()` → account balance (SDK)
-   - `/portfolio/settlements` → settled positions with P&L (raw API)
-   - `/portfolio/fills` → trade history (raw API)
-   - `/markets/{ticker}` → market details for titles (raw API, cached)
-6. `kalshi_parse_settlements()` and `kalshi_parse_fills()` convert Kalshi data to same format as Polymarket
+5. If Kalshi credentials are set, also fetches via `kalshi_python_sync`:
+   - `get_positions()` → open/settled positions
+   - `get_fills()` → trade history
+   - `get_balance()` → account balance in cents
+   - `get_market(ticker)` → market details for enrichment
+6. `kalshi_enrich_positions()` and `kalshi_parse_fills()` convert Kalshi data to same format as Polymarket
 7. All positions/activities merged, sorted by timestamp, returned with `"platform"` field ("polymarket" or "kalshi")
 8. JSON response returned to frontend, which renders everything client-side with platform badges
 
@@ -63,13 +62,13 @@ Modal overlay showing current open positions in a shareable sportsbook-ticket fo
 
 ## Dashboard Features
 
-- **Stats cards**: Balance (combined PM + Kalshi), Open Positions, Portfolio Value, Today's P&L, Yesterday's P&L, Total P&L, Win Rate
+- **Stats cards**: Balance, Open Positions, Portfolio Value, Today's P&L, Yesterday's P&L, Total P&L, Win Rate
 - **Open Positions table**: Market — Pick, Qty, Entry, Current, P&L, Return %
-- **Closed Positions tab**: Resolved bets with outcome and P&L (from both platforms)
+- **Closed Positions tab**: Resolved bets with outcome and P&L
 - **All Activity tab**: Full trade + resolution + balance change history
 - **Platform badges**: Blue "PM" for Polymarket, orange "K" for Kalshi on all positions/activities
-- **Manual refresh**: Refresh button (no auto-refresh to avoid Vercel timeout issues with Kalshi API calls)
-- **Activity cutoff**: filters out Polymarket activity before 2026-03-01 (prior arb trading data excluded)
+- **Auto-refresh**: polls `/api/data` every 60 seconds
+- **Activity cutoff**: filters out activity before 2026-03-01 (prior arb trading data excluded)
 
 ## Environment Variables
 
@@ -78,7 +77,7 @@ Modal overlay showing current open positions in a shareable sportsbook-ticket fo
 | `POLYMARKET_KEY_ID` | Polymarket US API key ID (UUID) |
 | `POLYMARKET_SECRET_KEY` | Polymarket US API secret (base64 ed25519 private key) |
 | `KALSHI_API_KEY` | Kalshi API key ID (optional — enables Kalshi integration) |
-| `KALSHI_PRIVATE_KEY` | Kalshi RSA private key in PEM format (paste directly, Vercel preserves newlines) |
+| `KALSHI_PRIVATE_KEY` | Kalshi RSA private key in PEM format (use `\n` for newlines in env var) |
 | `DASHBOARD_USER` | Login username |
 | `DASHBOARD_PASS` | Login password |
 | `FLASK_SECRET_KEY` | Flask session secret (auto-generated if not set) |
@@ -86,9 +85,8 @@ Modal overlay showing current open positions in a shareable sportsbook-ticket fo
 
 ## Debug Endpoints
 
-- `/api/raw` — Dumps raw Polymarket SDK responses (positions, balances, activities)
-- `/api/debug-markets` — Shows raw `marketMetadata` + full `MarketDetail` for each open Polymarket position
-- `/api/debug-kalshi` — Shows Kalshi client status, balance, positions, settlements (raw), and title cache size
+- `/api/raw` — Dumps raw SDK responses (positions, balances, activities)
+- `/api/debug-markets` — Shows raw `marketMetadata` + full `MarketDetail` for each open position
 
 ## Polymarket SDK Types Reference
 
@@ -105,17 +103,11 @@ Key types from `polymarket_us` (in `polymarket_us.types`):
 
 ## Kalshi SDK Reference
 
-- **Auth**: RSA-PSS signature via `kalshi_python_sync`. Client configured with `Configuration()` setting `host`, `api_key_id`, and `private_key_pem`.
-- **Host**: `https://api.elections.kalshi.com/trade-api/v2` — this is the correct host for ALL Kalshi markets (sports included). `api.kalshi.com` does NOT resolve.
-- **SDK returns typed objects**: Responses are Pydantic models (e.g., `GetBalanceResponse`), NOT plain dicts. Use `_to_dict()` helper to convert before accessing data.
-- **SDK Pydantic bugs**: `get_fills()` crashes with `ValidationError` because the API returns `count_fp` (string) and `yes_price_dollars` (string) but the SDK expects `count` (int) and `yes_price` (int). Use raw API calls for fills and settlements to bypass.
-- **Raw API pattern**: Use `kclient.call_api(method='GET', url=url, header_params={'Accept': 'application/json'})` then `response.read()` and parse `response.data` as JSON. Auth headers are applied automatically. URL base is `kclient.configuration.host` — append paths like `/portfolio/fills`, `/portfolio/settlements`, `/markets/{ticker}`.
-- **Fills API fields**: `action` ("buy"/"sell"), `side` ("yes"/"no"), `count_fp` (string like "5.00"), `yes_price_dollars`/`no_price_dollars` (string like "0.3800"), `ticker`, `created_time` (ISO timestamp with Z).
-- **Settlements API fields**: `ticker`, `market_result` ("yes"/"no"/"void"), `yes_count_fp`/`no_count_fp` (strings), `yes_total_cost_dollars`/`no_total_cost_dollars` (strings in dollars), `revenue` (int in cents), `fee_cost` (string in dollars), `settled_time` (ISO timestamp).
-- **Positions**: `get_positions()` returns open positions only — settled positions do NOT appear here. Use `/portfolio/settlements` for closed positions.
-- **Prices**: Dollar amounts in fills/settlements are strings already in dollars (NOT cents). Balance from `get_balance()` is in cents.
-- **Market titles**: Fetched via `/markets/{ticker}` raw API. Module-level `_kalshi_title_cache` persists between Vercel requests on the same container. Settlements look up max 20 new titles per request to avoid timeouts. Fills reuse the cache.
-- **Timeout management**: Vercel serverless functions have ~10s timeout on hobby plan. Kalshi data fetching is ordered: balance → positions → settlements → fills (50 max). No pagination on any Kalshi endpoint to stay within limits.
+- **Auth**: RSA-PSS signature via `kalshi_python_sync`. Client configured with `Configuration()` setting `api_key_id` and `private_key_pem` (PEM string with `\n` replaced to real newlines).
+- **Prices**: Kalshi uses cents (0-100). Divide by 100 for dollar amounts. Balance also in cents.
+- **Fills**: Each fill has explicit `side` ("yes"/"no") and `action` ("buy"/"sell") fields — much cleaner than Polymarket's inferred buy/sell.
+- **Positions**: `get_positions()` returns list with `ticker`, `position` (qty), `market_exposure`, `resting_orders_count`. Settlement via `settlement_value`.
+- **Markets**: `get_market(ticker)` returns `title`, `event_ticker`, `subtitle`, `yes_bid`/`yes_ask`/`no_bid`/`no_ask` for pricing.
 
 ## Common Tasks
 
@@ -124,5 +116,4 @@ Key types from `polymarket_us` (in `polymarket_us.types`):
 - **Modify pick label logic**: Edit `enrich_positions()` in app.py (priority chain for outcome derivation)
 - **Add new data source**: Add fetch function in app.py, call it in `api_data()`, pass to frontend via JSON
 - **Change activity cutoff date**: Edit `CUTOFF_DATE` in `api_data()` route
-- **Add new platform**: Follow Kalshi pattern — add client setup, fetch functions, enrich/parse functions, merge in `api_data()`. Use raw API calls if SDK has Pydantic validation issues.
-- **Fix Kalshi SDK issues**: Always use raw API (`call_api()`) instead of SDK methods for endpoints that return data with string/float fields the SDK expects as int. The SDK's Pydantic models are strict and don't handle the API's actual response format.
+- **Add new platform**: Follow Kalshi pattern — add client setup, fetch functions, enrich/parse functions, merge in `api_data()`
