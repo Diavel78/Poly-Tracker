@@ -823,18 +823,22 @@ def api_debug_kalshi():
             except Exception as e:
                 debug[name] = {"_error": str(e), "_type": type(e).__name__}
 
-        # Fills: use raw API to bypass SDK Pydantic bug
+        # Fills: inspect raw response
         try:
             import json as _json
-            url = f"{kclient.configuration.host}/trade-api/v2/portfolio/fills?limit=3"
+            host = kclient.configuration.host
+            debug["host"] = host
+            url = f"{host}/trade-api/v2/portfolio/fills?limit=3"
             response = kclient.call_api(
                 method='GET',
                 url=url,
                 header_params={'Accept': 'application/json'}
             )
             response.read()
-            raw_fills = _json.loads(response.data.decode('utf-8'))
-            debug["fills_raw"] = raw_fills
+            raw_bytes = response.data
+            debug["fills_status"] = response.status
+            debug["fills_raw_type"] = str(type(raw_bytes))
+            debug["fills_raw_preview"] = str(raw_bytes[:500]) if raw_bytes else "empty"
         except Exception as e:
             debug["fills_raw"] = {"_error": str(e), "_type": type(e).__name__}
 
