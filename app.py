@@ -729,62 +729,33 @@ def kalshi_parse_fills(kclient, fills, title_cache=None):
 
 
 def kalshi_fetch_settlements(kclient, limit=200):
-    """Fetch settlement history from Kalshi using raw API.
-
-    Returns list of settlement dicts with: ticker, event_ticker, market_result,
-    yes_count, yes_total_cost, no_count, no_total_cost, revenue, settled_time,
-    fee_cost, value.
-    """
+    """Fetch settlement history from Kalshi using raw API. Single page."""
     import json as _json
-    all_settlements = []
-    cursor = None
     try:
-        for _ in range(10):
-            url = f"{kclient.configuration.host}/portfolio/settlements?limit={limit}"
-            if cursor:
-                url += f"&cursor={cursor}"
-            response = kclient.call_api(
-                method='GET',
-                url=url,
-                header_params={'Accept': 'application/json'}
-            )
-            response.read()
-            raw = _json.loads(response.data.decode('utf-8'))
-            settlements = raw.get("settlements", [])
-            if not settlements:
-                break
-            all_settlements.extend(settlements)
-            cursor = raw.get("cursor")
-            if not cursor:
-                break
+        url = f"{kclient.configuration.host}/portfolio/settlements?limit={limit}"
+        response = kclient.call_api(
+            method='GET',
+            url=url,
+            header_params={'Accept': 'application/json'}
+        )
+        response.read()
+        raw = _json.loads(response.data.decode('utf-8'))
+        return raw.get("settlements", [])
     except Exception as e:
         print(f"ERROR fetching Kalshi settlements: {e}")
-    return all_settlements
+        return []
 
 
 def kalshi_parse_settlements(kclient, settlements, title_cache=None):
     """Convert Kalshi settlements to closed position activity format.
 
-    Each settlement has: ticker, market_result (yes/no/void), yes_count,
-    yes_total_cost, no_count, no_total_cost, revenue (all in cents),
-    settled_time, fee_cost (string dollars).
+    Does NOT do market title lookups — uses module-level cache from prior
+    requests or ticker as fallback. Titles resolve after first load.
     """
     global _kalshi_title_cache
     if title_cache is None:
         title_cache = {}
     closed = []
-
-    # Collect unique tickers to look up (skip ones already cached)
-    unique_tickers = set()
-    for s in settlements:
-        t = s.get("ticker", "")
-        if t and t not in _kalshi_title_cache and t not in title_cache:
-            unique_tickers.add(t)
-
-    # Look up titles (these are settlements so count is manageable)
-    for ticker in unique_tickers:
-        m = kalshi_fetch_market(kclient, ticker)
-        title_cache[ticker] = m.get("title", ticker)
 
     for s in settlements:
         ticker = s.get("ticker", "")
