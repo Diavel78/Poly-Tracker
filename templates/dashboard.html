@@ -571,14 +571,25 @@
                 return;
             }
             let html = '<table><thead><tr>' +
-                '<th>Date</th><th>Market</th>' +
+                '<th>Date</th><th>Market</th><th>Result</th>' +
                 '<th class="right">Qty</th><th class="right">Entry</th>' +
                 '<th class="right">P&L</th></tr></thead><tbody>';
 
             for (const c of closed) {
+                let result = '';
+                if (c.type === 'Trade') {
+                    result = '<span style="color:#58a6ff">Sold</span>';
+                } else if (c.pnl !== null && c.pnl > 0) {
+                    result = '<span style="color:#3fb950">W</span>';
+                } else if (c.pnl !== null && c.pnl < 0) {
+                    result = '<span style="color:#f85149">L</span>';
+                } else {
+                    result = '<span style="color:#8b949e">Push</span>';
+                }
                 html += `<tr>
                     <td>${localTime(c.timestamp)}</td>
                     <td>${platformBadge(c.platform)}${esc(c.market)}</td>
+                    <td>${result}</td>
                     <td class="right">${c.quantity !== null ? c.quantity.toFixed(0) : '--'}</td>
                     <td class="right">${c.price !== null ? amt(c.price, '$') : '--'}</td>
                     <td class="right ${pnlClass(c.pnl)}">${pnlAmt(c.pnl)}</td>

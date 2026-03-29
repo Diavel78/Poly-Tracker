@@ -407,9 +407,10 @@ def parse_activities(client, activities):
         if act_type == "ACTIVITY_TYPE_TRADE":
             price = _safe_float(detail.get("price"))
             quantity = _safe_float(detail.get("qty"))
-            # SDK's realizedPnl: null for buys, non-null for sells/closes
+            # Detect sell/close: realizedPnl non-null, or explicit side/action
             sdk_rpnl = _safe_float(detail.get("realizedPnl"))
-            is_close = sdk_rpnl is not None
+            trade_side = (detail.get("side") or detail.get("tradeType") or "").lower()
+            is_close = sdk_rpnl is not None or trade_side in ("sell", "close", "short")
             pnl = None  # computed in post-processing pass below
 
             # Resolve market name from slug
@@ -1209,7 +1210,9 @@ def api_data():
     total_balance = pm_balance + kalshi_balance
 
     open_positions = [p for p in all_enriched if not p.get("expired")]
-    closed_positions = [a for a in all_activities if a["type"] == "Position Resolution"]
+    closed_positions = [a for a in all_activities
+                        if a["type"] == "Position Resolution"
+                        or (a["type"] == "Trade" and a.get("pnl") is not None)]
 
     tz_offset = request.args.get("tz", 0, type=int)
     summary = compute_summary(all_enriched, all_activities, tz_offset_minutes=tz_offset)
