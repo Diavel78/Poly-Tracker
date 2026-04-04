@@ -565,31 +565,56 @@ def api_raw():
 @app.route("/api/debug-trades")
 @login_required
 def api_debug_trades():
-    """Debug: show raw trade detail fields for recent sell activities."""
+    """Debug: show raw trade detail fields, grouped by slug."""
     try:
         client = get_client()
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
     try:
-        activities = client.portfolio.activities(params={"limit": 50})
-        acts = activities.get("activities", [])
+        all_acts = fetch_activities(client)
     except Exception as e:
         return jsonify({"error": f"activities: {e}"}), 500
 
-    trades = []
-    for act in acts:
+    # Group trades by slug, show key fields
+    by_slug = {}
+    for act in all_acts:
         if act.get("type") != "ACTIVITY_TYPE_TRADE":
             continue
         detail = act.get("trade", {})
-        trades.append({
-            "all_detail_keys": list(detail.keys()) if isinstance(detail, dict) else str(type(detail)),
-            "detail": detail,
-        })
-        if len(trades) >= 10:
-            break
+        slug = detail.get("marketSlug", "unknown")
+        rpnl = detail.get("realizedPnl")
+        entry = {
+            "timestamp": detail.get("updateTime") or detail.get("timestamp"),
+            "price": detail.get("price"),
+            "qty": detail.get("qty"),
+            "realizedPnl": rpnl,
+            "is_sell": rpnl is not None,
+            "all_keys": sorted(detail.keys()) if isinstance(detail, dict) else [],
+        }
+        # Include beforePosition/afterPosition cost if present
+        for poskey in ("beforePosition", "afterPosition"):
+            pos = detail.get(poskey, {})
+            if pos:
+                entry[poskey] = {
+                    "netPosition": pos.get("netPosition"),
+                    "cost": pos.get("cost"),
+                    "realized": pos.get("realized"),
+                    "cashValue": pos.get("cashValue"),
+                }
+        if slug not in by_slug:
+            by_slug[slug] = []
+        by_slug[slug].append(entry)
 
-    return jsonify({"trade_count": len(trades), "trades": trades})
+    # Only show slugs that have sells (most interesting for debugging)
+    sell_slugs = {s: trades for s, trades in by_slug.items()
+                  if any(t["is_sell"] for t in trades)}
+
+    return jsonify({
+        "total_slugs": len(by_slug),
+        "slugs_with_sells": len(sell_slugs),
+        "trades_by_slug": sell_slugs,
+    })
 
 
 @app.route("/api/debug-markets")
