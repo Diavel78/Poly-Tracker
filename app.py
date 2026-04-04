@@ -649,15 +649,76 @@ def _normalize_owls_odds(sport, raw_data):
     return sorted(events_map.values(), key=lambda e: e.get("commence_time", ""))
 
 
+def _fetch_splits(sport):
+    """Fetch betting splits (handle % vs ticket %) for a sport."""
+    import time
+    cache_key = f"splits:{sport}"
+    now = time.time()
+    cached = _owls_cache.get(cache_key)
+    if cached and (now - cached["ts"]) < OWLS_CACHE_TTL:
+        return cached["data"], True
+
+    try:
+        raw = _owls_get(f"/{sport}/splits")
+        _owls_cache[cache_key] = {"data": raw, "ts": now}
+        return raw, False
+    except Exception:
+        return {}, False
+
+
+def _normalize_splits(raw_splits):
+    """Parse splits into { eventId -> { circa: {...}, draftkings: {...} } }.
+
+    Response: { "data": [ { "away_team", "home_team", "eventId",
+        "splits": [ { "book": "circa", "spread": { "away_handle_pct", "away_bets_pct" },
+                       "moneyline": {...}, "total": {...} },
+                     { "book": "draftkings", ... } ]
+    } ] }
+    """
+    splits_map = {}
+    raw_data = raw_splits.get("data", [])
+    if not isinstance(raw_data, list):
+        return {}
+
+    for ev in raw_data:
+        eid = ev.get("eventId") or ev.get("id", "")
+        if not eid:
+            continue
+
+        ev_splits = {}
+        for sp in ev.get("splits", []):
+            book = sp.get("book", "")
+            if not book:
+                continue
+            ev_splits[book] = {
+                "title": sp.get("title", book),
+                "moneyline": sp.get("moneyline", {}),
+                "spread": sp.get("spread", {}),
+                "total": sp.get("total", {}),
+            }
+
+        if ev_splits:
+            splits_map[eid] = ev_splits
+
+    return splits_map
+
+
+def _merge_splits(events, splits_map):
+    """Attach splits data to each event."""
+    for ev in events:
+        eid = ev.get("id", "")
+        ev["splits"] = splits_map.get(eid, {})
+    return events
+
+
 @app.route("/api/odds")
 @login_required
 def api_odds():
-    """Fetch odds from Owls Insight for requested sports."""
+    """Fetch odds + splits from Owls Insight for requested sports."""
     if not OWLS_INSIGHT_API_KEY:
         return jsonify({"ok": False, "error": "OWLS_INSIGHT_API_KEY not configured"}), 500
 
     sport = request.args.get("sport", "mlb")
-    # Fetch all books by default (no books param = all available)
     books = request.args.get("books", "")
 
     errors = []
@@ -668,7 +729,6 @@ def api_odds():
     try:
         raw, from_cache = _owls_get_cached(sport, books)
         events = _normalize_owls_odds(sport, raw)
-        # Capture meta message for empty sports (e.g., MMA with no active card)
         meta = raw.get("meta", {})
         if meta.get("message"):
             meta_message = meta["message"]
@@ -677,7 +737,14 @@ def api_odds():
     except Exception as e:
         errors.append(f"{sport}: {e}")
 
-    # Determine which books actually have data
+    # Fetch splits and merge
+    try:
+        raw_splits, _ = _fetch_splits(sport)
+        splits_map = _normalize_splits(raw_splits)
+        events = _merge_splits(events, splits_map)
+    except Exception as e:
+        errors.append(f"splits: {e}")
+
     active_books = set()
     for ev in events:
         active_books.update(ev.get("books", {}).keys())
@@ -703,6 +770,20 @@ def api_odds_raw():
     books = request.args.get("books", "pinnacle,fanduel")
     try:
         raw = _owls_get(f"/{sport}/odds", {"books": books})
+        return jsonify(raw)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/splits/raw")
+@login_required
+def api_splits_raw():
+    """Debug: raw splits response."""
+    if not OWLS_INSIGHT_API_KEY:
+        return jsonify({"error": "no key"}), 500
+    sport = request.args.get("sport", "mlb")
+    try:
+        raw = _owls_get(f"/{sport}/splits")
         return jsonify(raw)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

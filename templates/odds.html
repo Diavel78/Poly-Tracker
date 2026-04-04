@@ -70,6 +70,20 @@
         .dlink{font-size:10px;color:#484f58;text-decoration:none;margin-left:4px}
         .dlink:hover{color:#58a6ff}
 
+        /* Splits bar */
+        .splits{display:flex;gap:12px;padding:6px 14px;background:#0d1117;border-top:1px solid #21262d;flex-wrap:wrap;align-items:center}
+        .splits-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#484f58}
+        .split-item{display:flex;align-items:center;gap:6px;font-size:11px}
+        .split-item .sname{color:#8b949e;font-weight:500}
+        .split-bar{display:flex;height:6px;width:80px;border-radius:3px;overflow:hidden;background:#21262d}
+        .split-fill-h{background:#f0883e;height:100%}
+        .split-fill-t{background:#58a6ff;height:100%}
+        .split-pct{font-weight:700;font-size:10px;min-width:28px;text-align:right}
+        .split-pct.sharp{color:#f0883e}
+        .split-pct.public{color:#58a6ff}
+        .split-tag{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;margin-left:4px}
+        .split-tag.sharp-signal{background:#f0883e22;color:#f0883e;border:1px solid #f0883e44}
+
         .empty-state{text-align:center;padding:60px 24px;color:#484f58;font-size:14px}
         .spinner{display:inline-block;width:14px;height:14px;border:2px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
         @keyframes spin{to{transform:rotate(360deg)}}
@@ -167,6 +181,46 @@
         return all.filter(b=>enabledBooks.has(b));
     }
 
+    function renderSplitsRow(circa, dk, label, mktKey, awayName, homeName) {
+        // Extract away handle/bets from circa (primary) or dk (fallback)
+        const src = circa?.[mktKey] || dk?.[mktKey];
+        if (!src) return '';
+
+        const awayH = src.away_handle_pct ?? src.awayHandlePct;
+        const awayT = src.away_bets_pct ?? src.awayBetsPct;
+        if (awayH == null && awayT == null) return '';
+
+        const homeH = awayH != null ? (100 - awayH) : null;
+        const homeT = awayT != null ? (100 - awayT) : null;
+
+        // Sharp signal: handle diverges from tickets by 15%+
+        const divergence = (awayH != null && awayT != null) ? Math.abs(awayH - awayT) : 0;
+        const isSharp = divergence >= 15;
+        const sharpSide = (awayH != null && awayT != null && awayH > awayT) ? awayName : homeName;
+
+        let h = `<div class="split-item">`;
+        h += `<span class="sname">${label}</span>`;
+
+        if (awayH != null) {
+            h += `<span class="split-pct" style="color:#8b949e">${awayName.substring(0,3).toUpperCase()}</span>`;
+            h += `<div class="split-bar"><div class="split-fill-h" style="width:${awayH}%"></div></div>`;
+            h += `<span class="split-pct sharp">${awayH}%</span>`;
+            h += `<span style="font-size:10px;color:#484f58;margin:0 2px">/</span>`;
+            h += `<span class="split-pct public">${awayT != null ? awayT + '%' : '--'}</span>`;
+        }
+
+        if (isSharp) {
+            h += `<span class="split-tag sharp-signal">SHARP ${esc(sharpSide.substring(0,3).toUpperCase())}</span>`;
+        }
+
+        // Source label
+        const srcBook = circa?.[mktKey] ? 'Circa' : 'DK';
+        h += `<span style="font-size:9px;color:#484f58;margin-left:4px">${srcBook}</span>`;
+
+        h += `</div>`;
+        return h;
+    }
+
     function renderBoard(){
         const board=$('board');
         const query=($('search').value||'').toLowerCase().trim();
@@ -240,7 +294,21 @@
                     h+=`<td><span class="oc ${cls(tot.price)}"><span class="pt">U ${tot.point}</span>${fmt(tot.price)}</span></td>`;
                 }else{h+=`<td><span class="oc na">--</span></td>`}
             }
-            h+=`</tr></tbody></table></div>`;
+            h+=`</tr></tbody></table>`;
+
+            // Splits (Circa + DraftKings)
+            const splits = ev.splits || {};
+            const circa = splits.circa;
+            const dk = splits.draftkings;
+            if (circa || dk) {
+                h += `<div class="splits"><span class="splits-label">Splits</span>`;
+                h += renderSplitsRow(circa, dk, 'ML', 'moneyline', away, home);
+                h += renderSplitsRow(circa, dk, 'SPR', 'spread', away, home);
+                h += renderSplitsRow(circa, dk, 'TOT', 'total', 'Over', 'Under');
+                h += `</div>`;
+            }
+
+            h+=`</div>`;
         }
         board.innerHTML=h;
     }
