@@ -1024,8 +1024,9 @@ def api_realtime_raw():
     if not OWLS_INSIGHT_API_KEY:
         return jsonify({"error": "no key"}), 500
     sport = request.args.get("sport", "mlb")
+    feed = request.args.get("feed", "realtime")  # realtime or ps3838-realtime
     try:
-        raw = _owls_get(f"/{sport}/realtime")
+        raw = _owls_get(f"/{sport}/{feed}")
         return jsonify(raw)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
