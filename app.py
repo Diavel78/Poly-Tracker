@@ -679,19 +679,16 @@ def _fetch_scores(sport):
 
 def _merge_scores(events, raw_scores, sport):
     """Match live scores to events by team names (order-independent)."""
-    # Handle both response formats:
+    # Handle multiple response formats:
+    # Sport-specific /{sport}/scores/live: { count: N, events: [...] }
     # Generic /scores/live: { data: { sports: { mlb: [...] } } }
-    # Sport-specific /{sport}/scores/live: { data: [...] } or { data: { sports: { mlb: [...] } } }
-    raw_data = raw_scores.get("data", {})
-    if isinstance(raw_data, list):
-        sport_scores = raw_data
-    elif isinstance(raw_data, dict):
-        sport_scores = raw_data.get("sports", {}).get(sport, [])
-        if not sport_scores:
-            # Maybe data is directly the list
-            sport_scores = raw_data.get(sport, [])
-    else:
-        sport_scores = []
+    sport_scores = raw_scores.get("events", [])
+    if not sport_scores:
+        raw_data = raw_scores.get("data", {})
+        if isinstance(raw_data, list):
+            sport_scores = raw_data
+        elif isinstance(raw_data, dict):
+            sport_scores = raw_data.get("sports", {}).get(sport, [])
     if not sport_scores:
         return events
 
