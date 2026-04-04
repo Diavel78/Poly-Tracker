@@ -907,6 +907,56 @@ def _detect_reverse_line(events):
     return events
 
 
+@app.route("/api/my-bets")
+@login_required
+def api_my_bets():
+    """Return active Polymarket positions for matching on the odds board."""
+    import time
+    cache_key = "my_bets"
+    now = time.time()
+    cached = _owls_cache.get(cache_key)
+    if cached and (now - cached["ts"]) < 60:  # 60s cache
+        return jsonify(cached["data"])
+
+    bets = []
+    try:
+        client = get_client()
+        positions = fetch_positions(client)
+        for slug, pos in positions:
+            if pos.get("expired"):
+                continue
+            net = _safe_float(pos.get("netPosition")) or 0
+            if abs(net) < 0.01:
+                continue
+
+            meta = pos.get("marketMetadata", {})
+            market_name = meta.get("title", "")
+            team = meta.get("team") or {}
+            team_name = team.get("name", "") if isinstance(team, dict) else ""
+            outcome = meta.get("outcome", "")
+            event_slug = meta.get("eventSlug", "")
+
+            cost = _safe_float(pos.get("cost"))
+            quantity = abs(net)
+
+            bets.append({
+                "slug": slug,
+                "event_slug": event_slug,
+                "market_name": market_name,
+                "team_name": team_name,
+                "outcome": outcome,
+                "side": "YES" if net > 0 else "NO",
+                "quantity": quantity,
+                "cost": cost,
+            })
+    except Exception as e:
+        return jsonify({"ok": False, "bets": [], "error": str(e)})
+
+    result = {"ok": True, "bets": bets}
+    _owls_cache[cache_key] = {"data": result, "ts": now}
+    return jsonify(result)
+
+
 @app.route("/api/odds")
 @login_required
 def api_odds():

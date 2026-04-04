@@ -67,6 +67,10 @@
         .score-display .score-home{color:#e6edf3}
         .game-status{font-size:10px;color:#8b949e;margin-left:6px}
         .stale-tag{font-size:9px;color:#d29922;background:#d2992222;padding:2px 6px;border-radius:3px;margin-left:6px}
+        .my-bet-tag{font-size:9px;font-weight:700;padding:3px 8px;border-radius:4px;background:#6e56cf22;color:#a78bfa;border:1px solid #6e56cf44;margin-left:6px;display:inline-flex;align-items:center;gap:4px}
+        .my-bet-tag .check{font-size:12px}
+        .game.has-bet{border-color:#6e56cf66}
+        .game.has-bet .ghdr{border-bottom-color:#6e56cf44}
 
         .gtable{width:100%;border-collapse:collapse}
         .gtable th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#484f58;padding:4px 6px;background:#0d1117;border-bottom:1px solid #21262d;text-align:center}
@@ -426,8 +430,10 @@
             const sc = ev.score;
             const isLive = sc && sc.live;
             const liveClass = isLive ? ' live' : '';
+            const myBet = findMyBet(ev);
+            const betClass = myBet ? ' has-bet' : '';
 
-            h+=`<div class="game"><div class="ghdr${liveClass}">`;
+            h+=`<div class="game${betClass}"><div class="ghdr${liveClass}">`;
             if (isLive) {
                 h+=`<span><span class="live-badge">LIVE</span>${league}${esc(away)}`;
                 h+=` <span class="score-display"><span class="score-away">${sc.away_score ?? '-'}</span>`;
@@ -436,9 +442,12 @@
                 h+=`${esc(home)}`;
                 if (sc.period || sc.clock) h+=`<span class="game-status">${esc(sc.period)}${sc.clock ? ' ' + esc(sc.clock) : ''}</span>`;
                 h+=`<span class="stale-tag">pre-game odds</span>`;
+                if (myBet) h+=renderBetTag(myBet);
                 h+=`</span>`;
             } else {
-                h+=`<span>${league}${esc(away)} @ ${esc(home)}</span>`;
+                h+=`<span>${league}${esc(away)} @ ${esc(home)}`;
+                if (myBet) h+=renderBetTag(myBet);
+                h+=`</span>`;
             }
             h+=`<span class="gt">${esc(date)} ${esc(time)}</span></div>`;
 
@@ -581,6 +590,43 @@
         }
     }
 
+    function renderBetTag(bet) {
+        const pick = bet.team_name || bet.outcome || '?';
+        const cost = bet.cost != null ? ' $' + bet.cost.toFixed(2) : '';
+        return `<span class="my-bet-tag"><span class="check">&#10003;</span>POLY: ${esc(pick)}${cost}</span>`;
+    }
+
+    let myBets = []; // Active Polymarket positions
+
+    async function loadMyBets() {
+        try {
+            const resp = await fetch('/api/my-bets');
+            const data = await resp.json();
+            if (data.ok) myBets = data.bets || [];
+        } catch(e) { console.warn('my-bets:', e); }
+    }
+
+    function findMyBet(ev) {
+        // Match Polymarket position to odds event by team name
+        const away = (ev.away_team || '').toLowerCase();
+        const home = (ev.home_team || '').toLowerCase();
+        for (const bet of myBets) {
+            const tn = (bet.team_name || '').toLowerCase();
+            const mn = (bet.market_name || '').toLowerCase();
+            // Match if team name matches either side, or market name contains both teams
+            if (tn && (away.includes(tn) || home.includes(tn) || tn.includes(away.split(' ').pop()) || tn.includes(home.split(' ').pop()))) {
+                return bet;
+            }
+            if (mn && (mn.includes(away.split(' ').pop()) || mn.includes(home.split(' ').pop()))) {
+                // Check both team last-names are in the market name
+                const awayLast = away.split(' ').pop();
+                const homeLast = home.split(' ').pop();
+                if (mn.includes(awayLast) && mn.includes(homeLast)) return bet;
+            }
+        }
+        return null;
+    }
+
     function setSport(s){
         activeSport=s;
         firstLoad=true;
@@ -590,8 +636,10 @@
     }
 
     renderSportBar();
+    loadMyBets();
     loadOdds();
-    setInterval(loadOdds,5000); // refresh every 5 seconds — 201K/month at 8hrs/day
+    setInterval(loadOdds,5000);
+    setInterval(loadMyBets,60000); // refresh bets every 60s
     </script>
 </body>
 </html>
