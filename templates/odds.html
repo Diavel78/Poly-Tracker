@@ -118,19 +118,20 @@
         .dlink{font-size:10px;color:#484f58;text-decoration:none;margin-left:4px}
         .dlink:hover{color:#58a6ff}
 
-        /* Splits bar */
-        .splits{display:flex;gap:12px;padding:8px 14px;background:#0d1117;border-top:1px solid #f0883e33;flex-wrap:wrap;align-items:center}
-        .splits-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#f0883e;margin-right:4px}
-        .split-item{display:flex;align-items:center;gap:6px;font-size:11px}
-        .split-item .sname{color:#8b949e;font-weight:500}
-        .split-bar{display:flex;height:6px;width:80px;border-radius:3px;overflow:hidden;background:#21262d}
-        .split-fill-h{background:#f0883e;height:100%}
-        .split-fill-t{background:#58a6ff;height:100%}
-        .split-pct{font-weight:700;font-size:10px;min-width:28px;text-align:right}
-        .split-pct.sharp{color:#f0883e}
-        .split-pct.public{color:#58a6ff}
-        .split-tag{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;margin-left:4px}
-        .split-tag.sharp-signal{background:#f0883e22;color:#f0883e;border:1px solid #f0883e44}
+        /* Splits */
+        .splits{padding:6px 14px;background:#0d1117;border-top:1px solid #f0883e33}
+        .splits-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#f0883e}
+        .splits-grid{display:grid;grid-template-columns:40px 40px 40px 1fr auto auto auto;gap:0;padding:0 14px 8px;background:#0d1117;align-items:center;font-size:11px;row-gap:4px}
+        .sg-mkt{color:#8b949e;font-weight:600;font-size:10px}
+        .sg-team{color:#8b949e;font-size:10px}
+        .sg-bar{height:5px;border-radius:3px;overflow:hidden;background:#21262d;min-width:50px;max-width:100px}
+        .sg-fill{background:#f0883e;height:100%}
+        .sg-handle{font-weight:700;font-size:11px;color:#f0883e;text-align:right}
+        .sg-bets{font-weight:700;font-size:11px;color:#58a6ff;text-align:right}
+        .sg-tag{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px}
+        .sg-tag.sharp{background:#f0883e22;color:#f0883e;border:1px solid #f0883e44}
+        .sg-src{font-size:9px;color:#484f58}
+        .sg-sep{color:#484f58;font-size:10px;text-align:center}
         .rlm-tag{font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;background:#f8514922;color:#f85149;border:1px solid #f8514944;margin-left:8px;animation:rlm-pulse 2s infinite}
         @keyframes rlm-pulse{0%,100%{opacity:1}50%{opacity:.6}}
 
@@ -456,55 +457,41 @@
     });
 
     function renderSplitsRow(circa, dk, label, mktKey, awayName, homeName) {
-        // Prefer Circa, fall back to DK
         const src = circa?.[mktKey] || dk?.[mktKey];
         if (!src) return '';
         const srcLabel = circa?.[mktKey] ? 'Circa' : 'DK';
 
-        let awayH, awayT, homeH, homeT;
-
+        let awayH, awayT;
         if (mktKey === 'total') {
-            // Totals use over/under instead of away/home
             awayH = src.over_handle_pct;
             awayT = src.over_bets_pct;
-            homeH = src.under_handle_pct;
-            homeT = src.under_bets_pct;
         } else {
             awayH = src.away_handle_pct;
             awayT = src.away_bets_pct;
-            homeH = src.home_handle_pct;
-            homeT = src.home_bets_pct;
         }
-
         if (awayH == null && awayT == null) return '';
 
-        // Sharp signal: money diverges from bets by 15%+
-        const awayDiv = (awayH != null && awayT != null) ? awayH - awayT : 0;
-        const homeDiv = (homeH != null && homeT != null) ? homeH - homeT : 0;
-        const maxDiv = Math.max(Math.abs(awayDiv), Math.abs(homeDiv));
-        const isSharp = maxDiv >= 15;
-        const sharpSide = Math.abs(awayDiv) > Math.abs(homeDiv)
-            ? (awayDiv > 0 ? awayName : homeName)
-            : (homeDiv > 0 ? homeName : awayName);
+        const homeH = awayH != null ? (100 - awayH) : null;
+        const homeT = awayT != null ? (100 - awayT) : null;
+        const awayDiv = (awayH != null && awayT != null) ? Math.abs(awayH - awayT) : 0;
+        const homeDiv = (homeH != null && homeT != null) ? Math.abs(homeH - homeT) : 0;
+        const isSharp = Math.max(awayDiv, homeDiv) >= 15;
+        const sharpSide = (awayH != null && awayT != null && awayH > awayT) ? awayName
+            : (homeH != null && homeT != null && homeH > homeT) ? homeName : '';
 
-        let h = `<div class="split-item">`;
-        h += `<span class="sname">${label}</span>`;
-
-        // Away/Over side
-        h += `<span style="font-size:10px;color:#8b949e;min-width:30px">${esc(awayName.substring(0,3).toUpperCase())}</span>`;
-        if (awayH != null) {
-            h += `<div class="split-bar"><div class="split-fill-h" style="width:${awayH}%"></div></div>`;
-            h += `<span class="split-pct sharp">${awayH}%</span>`;
-            h += `<span style="font-size:9px;color:#484f58">/</span>`;
-            h += `<span class="split-pct public">${awayT != null ? awayT + '%' : '--'}</span>`;
+        // Grid row: MKT | TEAM | BAR | HANDLE% | / | BETS% | SHARP TAG
+        let h = '';
+        h += `<span class="sg-mkt">${label}</span>`;
+        h += `<span class="sg-team">${esc(awayName.substring(0,3).toUpperCase())}</span>`;
+        h += `<span><div class="sg-bar"><div class="sg-fill" style="width:${awayH||0}%"></div></div></span>`;
+        h += `<span class="sg-handle">${awayH != null ? awayH + '%' : '--'}</span>`;
+        h += `<span class="sg-sep">/</span>`;
+        h += `<span class="sg-bets">${awayT != null ? awayT + '%' : '--'}</span>`;
+        if (isSharp && sharpSide) {
+            h += `<span class="sg-tag sharp">${esc(sharpSide.substring(0,3).toUpperCase())}</span>`;
+        } else {
+            h += `<span class="sg-src">${srcLabel}</span>`;
         }
-
-        if (isSharp) {
-            h += `<span class="split-tag sharp-signal">SHARP ${esc(sharpSide.substring(0,3).toUpperCase())}</span>`;
-        }
-
-        h += `<span style="font-size:9px;color:#484f58;margin-left:4px">${srcLabel}</span>`;
-        h += `</div>`;
         return h;
     }
 
@@ -751,7 +738,8 @@
 
                 // Splits on separate row
                 if (circa || dk) {
-                    h += `<div class="splits"><span class="splits-label">Splits</span>`;
+                    h += `<div class="splits"><span class="splits-label">Splits</span></div>`;
+                    h += `<div class="splits-grid">`;
                     h += renderSplitsRow(circa, dk, 'ML', 'moneyline', away, home);
                     h += renderSplitsRow(circa, dk, 'SPR', 'spread', away, home);
                     h += renderSplitsRow(circa, dk, 'TOT', 'total', 'Over', 'Under');
