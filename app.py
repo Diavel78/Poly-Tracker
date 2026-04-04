@@ -553,9 +553,7 @@ OWLS_CACHE_TTL = 10  # seconds — MVP plan has 300K req/month, 400/min
 # Simple in-memory cache: { "sport:books" -> { "data": ..., "ts": time } }
 _owls_cache = {}
 
-# Opening line tracker: { event_numeric_id -> { "ml": {team: price}, "spread": {team: {price, point}}, "total": {...} } }
-# Stores the FIRST Pinnacle line we see for each event. Resets on server restart.
-_opening_lines = {}
+# Opening lines tracked client-side in localStorage (survives Vercel cold starts)
 
 
 def _owls_get(path, params=None):
@@ -821,110 +819,6 @@ def _merge_splits(events, splits_map):
     return events
 
 
-def _track_opening_lines(events):
-    """Store first-seen Pinnacle lines as opening lines. Detect movement."""
-    for ev in events:
-        nid = ev.get("numeric_id", "")
-        if not nid:
-            continue
-
-        pin = ev.get("books", {}).get("pinnacle", {})
-        if not pin.get("moneyline") and not pin.get("spread"):
-            continue
-
-        # Store opening line on first sight
-        if nid not in _opening_lines:
-            opener = {"ml": {}, "spread": {}, "total": {}}
-            for team, price in pin.get("moneyline", {}).items():
-                if price is not None:
-                    opener["ml"][team] = price
-            for team, data in pin.get("spread", {}).items():
-                if data and data.get("price") is not None:
-                    opener["spread"][team] = {"price": data["price"], "point": data.get("point")}
-            for side, data in pin.get("total", {}).items():
-                if data and data.get("price") is not None:
-                    opener["total"][side] = {"price": data["price"], "point": data.get("point")}
-            _opening_lines[nid] = opener
-
-        # Compute movement: current Pinnacle vs opener
-        opener = _opening_lines[nid]
-        movement = {"ml": {}, "spread": {}, "total": {}}
-
-        for team, cur_price in pin.get("moneyline", {}).items():
-            open_price = opener["ml"].get(team)
-            if open_price is not None and cur_price is not None:
-                diff = cur_price - open_price
-                movement["ml"][team] = {
-                    "open": open_price, "current": cur_price,
-                    "diff": diff,
-                }
-
-        for team, cur_data in pin.get("spread", {}).items():
-            open_data = opener["spread"].get(team)
-            if open_data and cur_data and cur_data.get("price") is not None:
-                movement["spread"][team] = {
-                    "open_price": open_data["price"],
-                    "open_point": open_data.get("point"),
-                    "current_price": cur_data["price"],
-                    "current_point": cur_data.get("point"),
-                    "point_diff": (cur_data.get("point") or 0) - (open_data.get("point") or 0),
-                    "price_diff": cur_data["price"] - open_data["price"],
-                }
-
-        for side, cur_data in pin.get("total", {}).items():
-            open_data = opener["total"].get(side)
-            if open_data and cur_data and cur_data.get("price") is not None:
-                movement["total"][side] = {
-                    "open_price": open_data["price"],
-                    "open_point": open_data.get("point"),
-                    "current_price": cur_data["price"],
-                    "current_point": cur_data.get("point"),
-                    "point_diff": (cur_data.get("point") or 0) - (open_data.get("point") or 0),
-                    "price_diff": cur_data["price"] - open_data["price"],
-                }
-
-        ev["pinnacle_movement"] = movement
-
-    return events
-
-
-def _detect_reverse_line(events):
-    """Flag reverse line movement: line moves one way, sharp money goes the other.
-
-    RLM = Pinnacle moves toward Team A (price gets more negative / more favorable)
-    but Circa handle % is heavy on Team B. Classic sharp signal.
-    """
-    for ev in events:
-        mv = ev.get("pinnacle_movement", {})
-        splits = ev.get("splits", {})
-        circa = splits.get("circa", {})
-        ev["reverse_line"] = {}
-
-        # Check ML
-        ml_mv = mv.get("ml", {})
-        ml_splits = circa.get("moneyline", {})
-        if ml_mv and ml_splits:
-            away = ev.get("away_team", "")
-            home = ev.get("home_team", "")
-            away_diff = ml_mv.get(away, {}).get("diff", 0)
-            away_handle = ml_splits.get("away_handle_pct")
-            home_handle = ml_splits.get("home_handle_pct")
-
-            if away_diff != 0 and away_handle is not None and home_handle is not None:
-                # Line moved toward away (price went up = more favorable for away)
-                # but handle is on home side = reverse line
-                line_favors_away = away_diff > 0
-                money_on_home = home_handle > 60
-                money_on_away = away_handle > 60
-                if (line_favors_away and money_on_home) or (not line_favors_away and money_on_away):
-                    sharp_side = home if line_favors_away and money_on_home else away
-                    ev["reverse_line"]["ml"] = {
-                        "side": sharp_side,
-                        "line_moved": "toward " + (away if line_favors_away else home),
-                        "money_on": home if money_on_home else away,
-                    }
-
-    return events
 
 
 @app.route("/api/my-bets")
@@ -1037,9 +931,7 @@ def api_odds():
     except Exception as e:
         errors.append(f"splits: {e}")
 
-    # Track Pinnacle opening lines and compute movement
-    events = _track_opening_lines(events)
-    events = _detect_reverse_line(events)
+    # Opening lines + movement + RLM tracked client-side (localStorage)
 
     # Merge live scores
     try:

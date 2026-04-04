@@ -202,6 +202,7 @@
 
     let activeSport = localStorage.getItem('odds_sport') || 'mlb';
     let oddsData = {events:[], books:[]};
+    let currentOpeners = {};
     const DEFAULT_BOOKS = ['fanduel','draftkings','betmgm','pinnacle','caesars'];
     let enabledBooks = new Set(JSON.parse(localStorage.getItem('odds_books') || 'null') || DEFAULT_BOOKS);
 
@@ -218,6 +219,127 @@
     function esc(s){if(!s)return '';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
     function fmt(p){if(p==null)return '--';return p>0?'+'+p:''+p}
     function cls(p){if(p==null)return 'na';if(p<-130)return 'fav';if(p>130)return 'dog';return 'even'}
+
+    // --- Opening line tracker (localStorage, persists across Vercel cold starts) ---
+    const TODAY = new Date().toISOString().slice(0,10); // "2026-04-04"
+
+    function getOpenersKey(sport) { return `openers:${TODAY}:${sport}`; }
+
+    function loadOpeners(sport) {
+        try { return JSON.parse(localStorage.getItem(getOpenersKey(sport)) || '{}'); }
+        catch { return {}; }
+    }
+
+    function saveOpeners(sport, openers) {
+        localStorage.setItem(getOpenersKey(sport), JSON.stringify(openers));
+        // Clean up old dates
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('openers:') && !k.startsWith(`openers:${TODAY}`)) {
+                localStorage.removeItem(k);
+            }
+        }
+    }
+
+    function captureOpeners(events, sport) {
+        const openers = loadOpeners(sport);
+        let changed = false;
+        for (const ev of events) {
+            const eid = ev.numeric_id || ev.id;
+            if (!eid || openers[eid]) continue;
+            const pin = (ev.books || {}).pinnacle;
+            if (!pin) continue;
+            const o = { ml: {}, spread: {}, total: {} };
+            for (const [team, price] of Object.entries(pin.moneyline || {})) {
+                if (price != null) o.ml[team] = price;
+            }
+            for (const [team, data] of Object.entries(pin.spread || {})) {
+                if (data?.price != null) o.spread[team] = { price: data.price, point: data.point };
+            }
+            for (const [side, data] of Object.entries(pin.total || {})) {
+                if (data?.price != null) o.total[side] = { price: data.price, point: data.point };
+            }
+            if (Object.keys(o.ml).length || Object.keys(o.spread).length) {
+                openers[eid] = o;
+                changed = true;
+            }
+        }
+        if (changed) saveOpeners(sport, openers);
+        return openers;
+    }
+
+    function computeMovement(ev, openers) {
+        const eid = ev.numeric_id || ev.id;
+        const opener = openers[eid];
+        if (!opener) return null;
+        const pin = (ev.books || {}).pinnacle;
+        if (!pin) return null;
+
+        const mv = { ml: {}, spread: {}, total: {} };
+        for (const [team, curPrice] of Object.entries(pin.moneyline || {})) {
+            const openPrice = opener.ml?.[team];
+            if (openPrice != null && curPrice != null) {
+                mv.ml[team] = { open: openPrice, current: curPrice, diff: curPrice - openPrice };
+            }
+        }
+        for (const [team, cur] of Object.entries(pin.spread || {})) {
+            const op = opener.spread?.[team];
+            if (op && cur?.price != null) {
+                mv.spread[team] = {
+                    open_price: op.price, open_point: op.point,
+                    current_price: cur.price, current_point: cur.point,
+                    point_diff: (cur.point||0) - (op.point||0),
+                    price_diff: cur.price - op.price,
+                };
+            }
+        }
+        for (const [side, cur] of Object.entries(pin.total || {})) {
+            const op = opener.total?.[side];
+            if (op && cur?.price != null) {
+                mv.total[side] = {
+                    open_price: op.price, open_point: op.point,
+                    current_price: cur.price, current_point: cur.point,
+                    point_diff: (cur.point||0) - (op.point||0),
+                    price_diff: cur.price - op.price,
+                };
+            }
+        }
+        return mv;
+    }
+
+    function detectRLM(mv, splits, away, home) {
+        if (!mv?.ml || !splits?.circa?.moneyline) return null;
+        const awayDiff = mv.ml[away]?.diff || 0;
+        const circa = splits.circa.moneyline;
+        const awayHandle = circa.away_handle_pct;
+        const homeHandle = circa.home_handle_pct;
+        if (awayDiff === 0 || awayHandle == null || homeHandle == null) return null;
+        const lineFavorsAway = awayDiff > 0;
+        const moneyOnHome = homeHandle > 60;
+        const moneyOnAway = awayHandle > 60;
+        if ((lineFavorsAway && moneyOnHome) || (!lineFavorsAway && moneyOnAway)) {
+            return lineFavorsAway && moneyOnHome ? home : away;
+        }
+        return null;
+    }
+
+    // On first load of the day, prefetch ALL sports to capture openers
+    async function prefetchOpeners() {
+        const prefetchKey = `prefetched:${TODAY}`;
+        if (localStorage.getItem(prefetchKey)) return; // already done today
+
+        const sports = SPORTS.filter(s => s !== activeSport); // active will be fetched normally
+        for (const sp of sports) {
+            try {
+                const resp = await fetch(`/api/odds?sport=${sp}`);
+                const data = await resp.json();
+                if (data.ok && data.events?.length) {
+                    captureOpeners(data.events, sp);
+                }
+            } catch(e) { console.warn(`prefetch ${sp}:`, e); }
+        }
+        localStorage.setItem(prefetchKey, '1');
+    }
 
     function localTime(s){
         if(!s)return '';
@@ -576,15 +698,15 @@
             h+=bestCellPt(best.tot_under, 'U');
             h+=`</tr></tbody></table>`;
 
-            // Pinnacle movement + Reverse line
-            const mv = ev.pinnacle_movement || {};
-            const rlm = ev.reverse_line || {};
-            const hasMv = Object.keys(mv.ml||{}).length || Object.keys(mv.spread||{}).length;
+            // Pinnacle movement + Reverse line (client-side from localStorage openers)
+            const mv = computeMovement(ev, currentOpeners) || {};
             const splits = ev.splits || {};
             const circa = splits.circa;
             const dk = splits.draftkings;
+            const rlmSide = detectRLM(mv, splits, away, home);
+            const hasMv = Object.keys(mv.ml||{}).length || Object.keys(mv.spread||{}).length;
 
-            if (hasMv || circa || dk || Object.keys(rlm).length) {
+            if (hasMv || circa || dk || rlmSide) {
                 h += `<div class="splits">`;
 
                 // Pinnacle movement
@@ -596,8 +718,8 @@
                 }
 
                 // Reverse line flag
-                if (rlm.ml) {
-                    h += `<span class="rlm-tag">RLM ${esc(rlm.ml.side.substring(0,3).toUpperCase())}</span>`;
+                if (rlmSide) {
+                    h += `<span class="rlm-tag">RLM ${esc(rlmSide.substring(0,3).toUpperCase())}</span>`;
                 }
 
                 h += `</div>`;
@@ -681,6 +803,8 @@
             }
             oddsData=data;
             firstLoad=false;
+            // Capture Pinnacle opening lines for today
+            currentOpeners = captureOpeners(data.events||[], activeSport);
             const n=(data.events||[]).length;
             const t=new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'});
             status.textContent=`${n} games · ${t}`;
@@ -810,7 +934,7 @@
 
     renderSportBar();
     loadMyBets();
-    loadOdds();
+    loadOdds().then(() => prefetchOpeners()); // after first load, prefetch all sports
     setInterval(loadOdds,5000);
     setInterval(loadMyBets,60000); // refresh bets every 60s
     </script>
