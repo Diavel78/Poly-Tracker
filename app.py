@@ -395,7 +395,8 @@ def parse_activities(client, activities):
             sdk_rpnl = _safe_float(detail.get("realizedPnl"))
             trade_side = (detail.get("side") or detail.get("tradeType") or "").lower()
             is_close = sdk_rpnl is not None or trade_side in ("sell", "close", "short")
-            pnl = None  # computed in post-processing pass below
+            # Use SDK's realizedPnl directly when available
+            pnl = sdk_rpnl  # will be overwritten by post-processing if tracking works
 
             # Resolve market name from slug
             if market_slug:
@@ -475,11 +476,12 @@ def parse_activities(client, activities):
         else:
             if pos["qty"] > 0:
                 avg_cost = pos["total_cost"] / pos["qty"]
-                act["pnl"] = round((act["price"] - avg_cost) * act["quantity"], 2)
+                computed_pnl = round((act["price"] - avg_cost) * act["quantity"], 2)
+                act["pnl"] = computed_pnl
                 pos["total_cost"] -= avg_cost * act["quantity"]
                 pos["qty"] -= act["quantity"]
-            else:
-                act["pnl"] = None
+            # If we couldn't compute from tracked buys, keep SDK's realizedPnl
+            # (already set as act["pnl"] from earlier)
 
     # Strip internal fields before returning
     for act in parsed:
