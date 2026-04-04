@@ -588,20 +588,17 @@ def api_debug_trades():
             "timestamp": detail.get("updateTime") or detail.get("timestamp"),
             "price": detail.get("price"),
             "qty": detail.get("qty"),
+            "cost": detail.get("cost"),
             "realizedPnl": rpnl,
             "is_sell": rpnl is not None,
-            "all_keys": sorted(detail.keys()) if isinstance(detail, dict) else [],
         }
-        # Include beforePosition/afterPosition cost if present
-        for poskey in ("beforePosition", "afterPosition"):
-            pos = detail.get(poskey, {})
-            if pos:
-                entry[poskey] = {
-                    "netPosition": pos.get("netPosition"),
-                    "cost": pos.get("cost"),
-                    "realized": pos.get("realized"),
-                    "cashValue": pos.get("cashValue"),
-                }
+        # Sell-only fields
+        if rpnl is not None:
+            entry["costBasis"] = detail.get("costBasis")
+            entry["originalPrice"] = detail.get("originalPrice")
+            entry["effectiveRealizedPnl"] = detail.get("effectiveRealizedPnl")
+            entry["effectiveCostBasis"] = detail.get("effectiveCostBasis")
+            entry["effectiveOriginalPrice"] = detail.get("effectiveOriginalPrice")
         if slug not in by_slug:
             by_slug[slug] = []
         by_slug[slug].append(entry)
@@ -609,6 +606,11 @@ def api_debug_trades():
     # Only show slugs that have sells (most interesting for debugging)
     sell_slugs = {s: trades for s, trades in by_slug.items()
                   if any(t["is_sell"] for t in trades)}
+
+    # Optional slug filter via query param: /api/debug-trades?slug=veg
+    slug_filter = request.args.get("slug", "").lower()
+    if slug_filter:
+        sell_slugs = {s: t for s, t in sell_slugs.items() if slug_filter in s.lower()}
 
     return jsonify({
         "total_slugs": len(by_slug),
