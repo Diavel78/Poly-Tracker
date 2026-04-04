@@ -312,7 +312,8 @@
 
                 oddsData = data;
                 const now = new Date();
-                status.textContent = `${(data.events || []).length} games · ${now.toLocaleTimeString()}`;
+                const cacheTag = data.cached ? ' (cached)' : '';
+                status.textContent = `${(data.events || []).length} games · ${now.toLocaleTimeString()}${cacheTag}`;
                 status.className = 'status';
 
                 renderBoard();

@@ -548,6 +548,10 @@ def dashboard():
 OWLS_BASE = "https://api.owlsinsight.com/api/v1"
 OWLS_DEFAULT_BOOKS = ["fanduel", "draftkings", "betmgm", "pinnacle", "caesars"]
 OWLS_SPORTS = ["mlb", "nba", "nhl", "nfl", "ncaab", "ncaaf", "mma", "soccer", "tennis"]
+OWLS_CACHE_TTL = 180  # seconds — serve cached odds for 3 minutes
+
+# Simple in-memory cache: { "sport:books" -> { "data": ..., "ts": time } }
+_owls_cache = {}
 
 
 def _owls_get(path, params=None):
@@ -557,6 +561,20 @@ def _owls_get(path, params=None):
                              params=params, timeout=15)
     resp.raise_for_status()
     return resp.json()
+
+
+def _owls_get_cached(sport, books):
+    """Fetch odds with server-side cache to avoid burning requests."""
+    import time
+    cache_key = f"{sport}:{books}"
+    now = time.time()
+    cached = _owls_cache.get(cache_key)
+    if cached and (now - cached["ts"]) < OWLS_CACHE_TTL:
+        return cached["data"], True  # data, from_cache
+
+    raw = _owls_get(f"/{sport}/odds", {"books": books})
+    _owls_cache[cache_key] = {"data": raw, "ts": now}
+    return raw, False
 
 
 def _normalize_owls_odds(sport, raw_data):
@@ -641,8 +659,9 @@ def api_odds():
     errors = []
     events = []
 
+    from_cache = False
     try:
-        raw = _owls_get(f"/{sport}/odds", {"books": books})
+        raw, from_cache = _owls_get_cached(sport, books)
         events = _normalize_owls_odds(sport, raw)
     except http_requests.HTTPError as e:
         errors.append(f"{sport}: HTTP {e.response.status_code}")
@@ -656,6 +675,7 @@ def api_odds():
 
     return jsonify({
         "ok": True,
+        "cached": from_cache,
         "sport": sport,
         "events": events,
         "books": sorted(active_books),
