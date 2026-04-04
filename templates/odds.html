@@ -58,6 +58,14 @@
         .books-col{flex:1;min-width:0;overflow:hidden}
         .ghdr{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;font-size:11px;color:#8b949e;border-bottom:1px solid #21262d}
         .ghdr .gt{font-weight:600;color:#58a6ff}
+        .ghdr.live{border-left:3px solid #3fb950}
+        .live-badge{font-size:9px;font-weight:700;color:#3fb950;background:#3fb95022;padding:2px 6px;border-radius:3px;margin-right:6px;animation:live-pulse 1.5s infinite}
+        @keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+        .score-display{font-size:16px;font-weight:700;color:#e6edf3;margin:0 8px;letter-spacing:1px}
+        .score-display .score-away{color:#e6edf3}
+        .score-display .score-sep{color:#484f58;margin:0 4px}
+        .score-display .score-home{color:#e6edf3}
+        .game-status{font-size:10px;color:#8b949e;margin-left:6px}
 
         .gtable{width:100%;border-collapse:collapse}
         .gtable th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#484f58;padding:4px 6px;background:#0d1117;border-bottom:1px solid #21262d;text-align:center}
@@ -414,7 +422,23 @@
             const league=ev.league?esc(ev.league)+' · ':'';
             const best = findBestOdds(ev, books, away, home);
 
-            h+=`<div class="game"><div class="ghdr"><span>${league}${esc(away)} @ ${esc(home)}</span><span class="gt">${esc(date)} ${esc(time)}</span></div>`;
+            const sc = ev.score;
+            const isLive = sc && sc.live;
+            const liveClass = isLive ? ' live' : '';
+
+            h+=`<div class="game"><div class="ghdr${liveClass}">`;
+            if (isLive) {
+                h+=`<span><span class="live-badge">LIVE</span>${league}${esc(away)}`;
+                h+=` <span class="score-display"><span class="score-away">${sc.away_score ?? '-'}</span>`;
+                h+=`<span class="score-sep">-</span>`;
+                h+=`<span class="score-home">${sc.home_score ?? '-'}</span></span> `;
+                h+=`${esc(home)}`;
+                if (sc.period || sc.clock) h+=`<span class="game-status">${esc(sc.period)}${sc.clock ? ' ' + esc(sc.clock) : ''}</span>`;
+                h+=`</span>`;
+            } else {
+                h+=`<span>${league}${esc(away)} @ ${esc(home)}</span>`;
+            }
+            h+=`<span class="gt">${esc(date)} ${esc(time)}</span></div>`;
 
             // === BEST ODDS (left, always visible) ===
             h+=`<div class="best-and-books">`;

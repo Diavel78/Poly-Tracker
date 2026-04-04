@@ -654,6 +654,60 @@ def _normalize_owls_odds(sport, raw_data):
     return sorted(events_map.values(), key=lambda e: e.get("commence_time", ""))
 
 
+def _fetch_scores(sport):
+    """Fetch live scores, cached briefly."""
+    import time
+    cache_key = f"scores:{sport}"
+    now = time.time()
+    cached = _owls_cache.get(cache_key)
+    if cached and (now - cached["ts"]) < 30:  # 30s cache for scores
+        return cached["data"], True
+    try:
+        raw = _owls_get("/scores/live")
+        _owls_cache[cache_key] = {"data": raw, "ts": now}
+        return raw, False
+    except Exception:
+        return {}, False
+
+
+def _merge_scores(events, raw_scores, sport):
+    """Match live scores to events by team names."""
+    sport_scores = raw_scores.get("data", {}).get("sports", {}).get(sport, [])
+    if not sport_scores:
+        return events
+
+    # Build lookup: normalize team name -> score data
+    scores_by_teams = {}
+    for game in sport_scores:
+        away_info = game.get("away", {})
+        home_info = game.get("home", {})
+        away_name = away_info.get("team", {}).get("displayName", "")
+        home_name = home_info.get("team", {}).get("displayName", "")
+        away_score = away_info.get("score")
+        home_score = home_info.get("score")
+        status = game.get("status", {})
+        period = game.get("period") or game.get("inning") or ""
+        clock = game.get("clock") or game.get("displayClock") or ""
+
+        if away_name and home_name:
+            key = f"{away_name.lower()}@{home_name.lower()}"
+            scores_by_teams[key] = {
+                "away_score": away_score,
+                "home_score": home_score,
+                "status": status if isinstance(status, str) else status.get("type", {}).get("description", ""),
+                "period": str(period),
+                "clock": str(clock),
+                "live": True,
+            }
+
+    for ev in events:
+        key = f"{ev.get('away_team', '').lower()}@{ev.get('home_team', '').lower()}"
+        if key in scores_by_teams:
+            ev["score"] = scores_by_teams[key]
+
+    return events
+
+
 def _fetch_splits(sport):
     """Fetch betting splits (handle % vs ticket %) for a sport."""
     import time
@@ -862,6 +916,13 @@ def api_odds():
     # Track Pinnacle opening lines and compute movement
     events = _track_opening_lines(events)
     events = _detect_reverse_line(events)
+
+    # Merge live scores
+    try:
+        raw_scores, _ = _fetch_scores(sport)
+        events = _merge_scores(events, raw_scores, sport)
+    except Exception as e:
+        errors.append(f"scores: {e}")
 
     active_books = set()
     leagues = set()
