@@ -389,16 +389,18 @@ def parse_activities(client, activities):
         if act_type == "ACTIVITY_TYPE_TRADE":
             price = _safe_float(detail.get("price"))
             quantity = _safe_float(detail.get("qty"))
-            # Don't trust SDK's realizedPnl — it uses complement pricing
-            # and produces wrong results. P&L computed in post-processing.
+            # Don't trust SDK's realizedPnl VALUE — it uses complement pricing.
+            # But non-null realizedPnl reliably indicates a sell/close trade.
+            # P&L will be computed correctly in post-processing.
+            sdk_rpnl = _safe_float(detail.get("realizedPnl"))
             pnl = None
 
-            # Detect sell: position qty decreased
+            # Detect sell: realizedPnl is non-null (primary), or position qty decreased (fallback)
             t_before = detail.get("beforePosition") or {}
             t_after = detail.get("afterPosition") or {}
             bq = abs(_safe_float(t_before.get("netPosition")) or 0)
             aq = abs(_safe_float(t_after.get("netPosition")) or 0)
-            is_close = bq > aq
+            is_close = sdk_rpnl is not None or bq > aq
 
             # Resolve market name from slug
             if market_slug:
