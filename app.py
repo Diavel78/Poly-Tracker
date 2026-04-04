@@ -797,6 +797,40 @@ def api_splits_raw():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/realtime/raw")
+@login_required
+def api_realtime_raw():
+    """Debug: raw realtime sharp odds response."""
+    if not OWLS_INSIGHT_API_KEY:
+        return jsonify({"error": "no key"}), 500
+    sport = request.args.get("sport", "mlb")
+    try:
+        raw = _owls_get(f"/{sport}/realtime")
+        return jsonify(raw)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/history/raw")
+@login_required
+def api_history_raw():
+    """Debug: raw historical games/odds response."""
+    if not OWLS_INSIGHT_API_KEY:
+        return jsonify({"error": "no key"}), 500
+    sport = request.args.get("sport", "mlb")
+    # Try the history endpoints
+    endpoint = request.args.get("endpoint", "games")
+    event_id = request.args.get("event_id", "")
+    try:
+        if endpoint == "odds" and event_id:
+            raw = _owls_get(f"/history/odds", {"eventId": event_id})
+        else:
+            raw = _owls_get(f"/history/games", {"sport": sport})
+        return jsonify(raw)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/raw")
 @login_required
 def api_raw():
