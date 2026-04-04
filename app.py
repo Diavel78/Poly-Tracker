@@ -655,19 +655,26 @@ def _normalize_owls_odds(sport, raw_data):
 
 
 def _fetch_scores(sport):
-    """Fetch live scores, cached briefly."""
+    """Fetch live scores, cached briefly. Uses sport-specific endpoint for richer data."""
     import time
     cache_key = f"scores:{sport}"
     now = time.time()
     cached = _owls_cache.get(cache_key)
-    if cached and (now - cached["ts"]) < 30:  # 30s cache for scores
+    if cached and (now - cached["ts"]) < 30:
         return cached["data"], True
     try:
-        raw = _owls_get("/scores/live")
+        # Sport-specific endpoint has period/inning/displayStatus
+        raw = _owls_get(f"/{sport}/scores/live")
         _owls_cache[cache_key] = {"data": raw, "ts": now}
         return raw, False
     except Exception:
-        return {}, False
+        try:
+            # Fallback to generic endpoint
+            raw = _owls_get("/scores/live")
+            _owls_cache[cache_key] = {"data": raw, "ts": now}
+            return raw, False
+        except Exception:
+            return {}, False
 
 
 def _merge_scores(events, raw_scores, sport):
@@ -693,6 +700,11 @@ def _merge_scores(events, raw_scores, sport):
         elif isinstance(status_obj, str):
             state = status_obj
 
+        # displayStatus has the rich label like "Top 7th", "Bottom 3rd", "Final"
+        display_status = game.get("displayStatus") or ""
+        period = game.get("period") or game.get("inning") or ""
+        clock = game.get("displayClock") or game.get("clock") or ""
+
         scores_lookup.append({
             "teams": frozenset([away_name.lower(), home_name.lower()]),
             "away_name": away_name,
@@ -702,8 +714,9 @@ def _merge_scores(events, raw_scores, sport):
             "away_logo": away_team.get("logoUrl", ""),
             "home_logo": home_team.get("logoUrl", ""),
             "state": state,
-            "period": str(game.get("period") or game.get("inning") or ""),
-            "clock": str(game.get("displayClock") or game.get("clock") or ""),
+            "display_status": str(display_status),
+            "period": str(period),
+            "clock": str(clock),
         })
 
     for ev in events:
@@ -712,24 +725,22 @@ def _merge_scores(events, raw_scores, sport):
             if ev_teams == sc["teams"]:
                 # Map scores back to odds-feed home/away orientation
                 ev_away = ev.get("away_team", "").lower()
+                base = {
+                    "state": sc["state"],
+                    "display_status": sc["display_status"],
+                    "period": sc["period"],
+                    "clock": sc["clock"],
+                    "live": sc["state"] in ("in", "live", "In Progress"),
+                }
                 if sc["away_name"].lower() == ev_away:
-                    ev["score"] = {
+                    ev["score"] = {**base,
                         "away_score": sc["away_score"],
                         "home_score": sc["home_score"],
-                        "state": sc["state"],
-                        "period": sc["period"],
-                        "clock": sc["clock"],
-                        "live": sc["state"] in ("in", "live", "In Progress"),
                     }
                 else:
-                    # Swapped — flip scores to match odds orientation
-                    ev["score"] = {
+                    ev["score"] = {**base,
                         "away_score": sc["home_score"],
                         "home_score": sc["away_score"],
-                        "state": sc["state"],
-                        "period": sc["period"],
-                        "clock": sc["clock"],
-                        "live": sc["state"] in ("in", "live", "In Progress"),
                     }
                 break
 
@@ -1085,7 +1096,12 @@ def api_scores_raw():
     sport = request.args.get("sport", "")
     try:
         if sport:
-            raw = _owls_get(f"/scores/live", {"sport": sport})
+            # Try sport-specific endpoint first (has inning/period data)
+            try:
+                raw = _owls_get(f"/{sport}/scores/live")
+                return jsonify(raw)
+            except Exception:
+                raw = _owls_get(f"/scores/live", {"sport": sport})
         else:
             raw = _owls_get(f"/scores/live")
         return jsonify(raw)

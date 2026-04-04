@@ -440,7 +440,8 @@
                 h+=`<span class="score-sep">-</span>`;
                 h+=`<span class="score-home">${sc.home_score ?? '-'}</span></span> `;
                 h+=`${esc(home)}`;
-                if (sc.period || sc.clock) h+=`<span class="game-status">${esc(sc.period)}${sc.clock ? ' ' + esc(sc.clock) : ''}</span>`;
+                const gameState = sc.display_status || sc.period || sc.clock || '';
+                if (gameState) h+=`<span class="game-status">${esc(gameState)}</span>`;
                 h+=`<span class="stale-tag">pre-game odds</span>`;
                 if (myBet) h+=renderBetTag(myBet);
                 h+=`</span>`;
