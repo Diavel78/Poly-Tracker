@@ -805,13 +805,19 @@ def _normalize_splits(raw_splits):
             }
 
         if ev_splits:
+            has_circa = "circa" in ev_splits
             if eid:
-                splits_map[eid] = ev_splits
+                # Only overwrite if new entry has Circa, or no existing entry
+                if has_circa or eid not in splits_map:
+                    splits_map[eid] = ev_splits
             # Also index by team names for fallback matching
             away = ev.get("away_team", "").lower()
             home = ev.get("home_team", "").lower()
             if away and home:
-                splits_by_teams[frozenset([away, home])] = ev_splits
+                teams_key = frozenset([away, home])
+                # Prefer entries with Circa data
+                if has_circa or teams_key not in splits_by_teams:
+                    splits_by_teams[teams_key] = ev_splits
 
     return splits_map, splits_by_teams
 
