@@ -548,7 +548,7 @@ def dashboard():
 OWLS_BASE = "https://api.owlsinsight.com/api/v1"
 OWLS_DEFAULT_BOOKS = ["fanduel", "draftkings", "betmgm", "pinnacle", "caesars"]
 OWLS_SPORTS = ["mlb", "nba", "nhl", "nfl", "ncaab", "ncaaf", "mma", "soccer", "tennis"]
-OWLS_CACHE_TTL = 180  # seconds — serve cached odds for 3 minutes
+OWLS_CACHE_TTL = 10  # seconds — MVP plan has 300K req/month, 400/min
 
 # Simple in-memory cache: { "sport:books" -> { "data": ..., "ts": time } }
 _owls_cache = {}
