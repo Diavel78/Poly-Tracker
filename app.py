@@ -562,89 +562,86 @@ def _owls_get(path, params=None):
 def _normalize_owls_odds(sport, raw_data):
     """Normalize Owls Insight response into a unified event list.
 
-    Raw response: { "data": { "pinnacle": [...events], "fanduel": [...] } }
-    Each event has markets with outcomes: { name, price (American), point }.
-    We merge across books into a single event list with per-book odds.
+    Raw response structure:
+    { "data": [ { "id", "home_team", "away_team", "commence_time",
+        "bookmakers": [
+          { "key": "pinnacle", "title": "Pinnacle", "event_link": "...",
+            "markets": [
+              { "key": "moneyline", "outcomes": [{ "name", "price", "point"? }] },
+              { "key": "spread", ... }, { "key": "total", ... }
+            ]
+          }, ...
+        ]
+      }, ... ]
+    }
     """
-    books_data = raw_data.get("data", raw_data)
-    if not isinstance(books_data, dict):
+    raw_events = raw_data.get("data", [])
+    if isinstance(raw_events, dict):
+        # Handle alternate format where data is keyed by book
+        raw_events = raw_data.get("events", [])
+    if not isinstance(raw_events, list):
         return []
 
-    # Build event index: merge same event across books
-    # Key by some event identifier (id, or home+away combo)
-    events_map = {}  # event_key -> event dict
+    events = []
+    for ev in raw_events:
+        home = ev.get("home_team") or ev.get("homeTeam") or ev.get("home", "")
+        away = ev.get("away_team") or ev.get("awayTeam") or ev.get("away", "")
+        commence = (ev.get("commence_time") or ev.get("commenceTime")
+                    or ev.get("start_time") or ev.get("startTime") or "")
 
-    for book, events in books_data.items():
-        if not isinstance(events, list):
-            continue
-        for ev in events:
-            # Try various key patterns the API might use
-            eid = ev.get("id") or ev.get("event_id") or ev.get("eventId", "")
-            home = ev.get("home_team") or ev.get("homeTeam") or ev.get("home", "")
-            away = ev.get("away_team") or ev.get("awayTeam") or ev.get("away", "")
-            event_key = str(eid) if eid else f"{away}@{home}"
+        event = {
+            "id": ev.get("id", ""),
+            "sport": sport,
+            "home_team": home,
+            "away_team": away,
+            "commence_time": commence,
+            "league": ev.get("league", ""),
+            "country_code": ev.get("country_code", ""),
+            "books": {},
+        }
 
-            if event_key not in events_map:
-                commence = (ev.get("commence_time") or ev.get("commenceTime")
-                            or ev.get("start_time") or ev.get("startTime") or "")
-                events_map[event_key] = {
-                    "id": eid,
-                    "sport": sport,
-                    "home_team": home,
-                    "away_team": away,
-                    "commence_time": commence,
-                    "league": ev.get("league", ""),
-                    "books": {},
-                }
+        bookmakers = ev.get("bookmakers", [])
+        if not isinstance(bookmakers, list):
+            bookmakers = []
 
-            # Extract markets for this book
+        for bk in bookmakers:
+            book_key = bk.get("key", "")
+            if not book_key:
+                continue
+
             book_odds = {
                 "moneyline": {}, "spread": {}, "total": {},
-                "event_link": ev.get("event_link", ""),
-                "event_ticker": ev.get("event_ticker", ""),
+                "event_link": bk.get("event_link", ""),
+                "event_ticker": bk.get("event_ticker", ""),
             }
 
-            # Markets might be nested or flat — handle both patterns
-            markets = ev.get("markets", ev.get("bookmakers", [ev]))
-            if isinstance(markets, dict):
-                markets = [markets]
-            elif not isinstance(markets, list):
-                markets = [ev]
+            for mkt in bk.get("markets", []):
+                mkt_key = mkt.get("key", "")
+                outcomes = mkt.get("outcomes", [])
 
-            for mkt in markets:
-                # Moneyline
-                for key in ("moneyline", "h2h", "head_to_head"):
-                    ml = mkt.get(key)
-                    if ml and isinstance(ml, dict):
-                        for outcome in ml.get("outcomes", []):
-                            name = outcome.get("name", "")
-                            book_odds["moneyline"][name] = outcome.get("price")
+                if mkt_key in ("moneyline", "h2h"):
+                    for o in outcomes:
+                        book_odds["moneyline"][o.get("name", "")] = o.get("price")
 
-                # Spread
-                for key in ("spread", "spreads", "point_spread"):
-                    sp = mkt.get(key)
-                    if sp and isinstance(sp, dict):
-                        for outcome in sp.get("outcomes", []):
-                            name = outcome.get("name", "")
-                            book_odds["spread"][name] = {
-                                "price": outcome.get("price"),
-                                "point": outcome.get("point"),
-                            }
+                elif mkt_key in ("spread", "spreads"):
+                    for o in outcomes:
+                        book_odds["spread"][o.get("name", "")] = {
+                            "price": o.get("price"),
+                            "point": o.get("point"),
+                        }
 
-                # Total
-                for key in ("total", "totals", "over_under"):
-                    tot = mkt.get(key)
-                    if tot and isinstance(tot, dict):
-                        for outcome in tot.get("outcomes", []):
-                            name = outcome.get("name", "")
-                            book_odds["total"][name] = {
-                                "price": outcome.get("price"),
-                                "point": outcome.get("point"),
-                            }
+                elif mkt_key in ("total", "totals"):
+                    for o in outcomes:
+                        book_odds["total"][o.get("name", "")] = {
+                            "price": o.get("price"),
+                            "point": o.get("point"),
+                        }
 
-            events_map[event_key]["books"][book] = book_odds
+            event["books"][book_key] = book_odds
 
-    return sorted(events_map.values(), key=lambda e: e.get("commence_time", ""))
+        events.append(event)
+
+    return sorted(events, key=lambda e: e.get("commence_time", ""))
 
 
 @app.route("/api/odds")
