@@ -136,7 +136,14 @@
 
     let activeSport = localStorage.getItem('odds_sport') || 'mlb';
     let oddsData = {events:[], books:[]};
-    let enabledBooks = new Set(JSON.parse(localStorage.getItem('odds_books') || '[]'));
+    const DEFAULT_BOOKS = ['fanduel','draftkings','betmgm','pinnacle','caesars'];
+    let enabledBooks = new Set(JSON.parse(localStorage.getItem('odds_books') || 'null') || DEFAULT_BOOKS);
+
+    // Map sport tab to expected league filter (only show major league games)
+    const LEAGUE_FILTER = {
+        mlb: 'MLB', nba: 'NBA', nhl: 'NHL', nfl: 'NFL',
+        ncaab: 'NCAAB', ncaaf: 'NCAAF'
+    };
 
     function esc(s){if(!s)return '';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
     function fmt(p){if(p==null)return '--';return p>0?'+'+p:''+p}
@@ -159,8 +166,6 @@
 
     function renderBookPills(){
         const books = oddsData.books||[];
-        // First load: enable all books by default
-        if(!enabledBooks.size && books.length) enabledBooks = new Set(books);
         let h='';
         for(const b of books){
             const on = enabledBooks.has(b);
@@ -221,12 +226,34 @@
         return h;
     }
 
+    function hasAnyOdds(ev, books) {
+        for (const bk of books) {
+            const bd = (ev.books || {})[bk];
+            if (!bd) continue;
+            if (Object.keys(bd.moneyline || {}).length) return true;
+            if (Object.keys(bd.spread || {}).length) return true;
+            if (Object.keys(bd.total || {}).length) return true;
+        }
+        return false;
+    }
+
     function renderBoard(){
         const board=$('board');
         const query=($('search').value||'').toLowerCase().trim();
         let events=(oddsData.events||[]);
-        if(query) events=events.filter(e=>(e.home_team+' '+e.away_team).toLowerCase().includes(query));
         const books=getBooks();
+
+        // Filter by league (e.g., only "MLB" games on MLB tab, not minor/college)
+        const leagueFilter = LEAGUE_FILTER[activeSport];
+        if (leagueFilter) {
+            events = events.filter(e => e.league === leagueFilter);
+        }
+
+        // Filter by search
+        if (query) events = events.filter(e => (e.home_team + ' ' + e.away_team).toLowerCase().includes(query));
+
+        // Hide games with zero odds across all enabled books
+        events = events.filter(e => hasAnyOdds(e, books));
 
         if(!events.length){
             const msg=oddsData.meta_message?esc(oddsData.meta_message):'No games found';
