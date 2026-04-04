@@ -624,10 +624,16 @@
         let events=(oddsData.events||[]);
         const books=getBooks();
 
-        // Filter by league (e.g., only "MLB" games on MLB tab, not minor/college)
+        // Filter by league — API returns "USA - MLB", "MLB", or ""
+        // Substring match: "USA - MLB" contains "MLB"
+        // Empty league = minor league/college junk, filter it OUT for major sports
         const leagueFilter = LEAGUE_FILTER[activeSport];
         if (leagueFilter) {
-            events = events.filter(e => leagueFilter.includes(e.league));
+            events = events.filter(e => {
+                const lg = (e.league || '').toUpperCase();
+                if (!lg) return false; // no league = not major league
+                return leagueFilter.some(f => lg.includes(f));
+            });
         }
 
         // Filter by search
