@@ -605,6 +605,7 @@ def _normalize_owls_odds(sport, raw_data):
             if eid not in events_map:
                 events_map[eid] = {
                     "id": eid,
+                    "numeric_id": str(ev.get("id", "")),
                     "sport": sport,
                     "home_team": ev.get("home_team", ""),
                     "away_team": ev.get("away_team", ""),
@@ -667,13 +668,14 @@ def _fetch_splits(sport):
 
 
 def _normalize_splits(raw_splits):
-    """Parse splits into { eventId -> { circa: {...}, draftkings: {...} } }.
+    """Parse splits into { event_id -> { circa: {...}, dk: {...} } }.
 
-    Response: { "data": [ { "away_team", "home_team", "eventId",
-        "splits": [ { "book": "circa", "spread": { "away_handle_pct", "away_bets_pct" },
-                       "moneyline": {...}, "total": {...} },
-                     { "book": "draftkings", ... } ]
-    } ] }
+    Response: { "data": [ { "event_id": "1627328008", "away_team", "home_team",
+        "splits": [ { "book": "circa", "title": "Circa Sports",
+            "moneyline": { "away_bets_pct", "away_handle_pct", "home_bets_pct", "home_handle_pct" },
+            "spread": { "away_bets_pct", "away_handle_pct", "away_line", "home_line", ... },
+            "total": { "over_bets_pct", "over_handle_pct", "under_bets_pct", "under_handle_pct", "line" }
+        } ] } ] }
     """
     splits_map = {}
     raw_data = raw_splits.get("data", [])
@@ -681,9 +683,10 @@ def _normalize_splits(raw_splits):
         return {}
 
     for ev in raw_data:
-        eid = ev.get("eventId") or ev.get("id", "")
+        eid = ev.get("event_id") or ev.get("eventId") or ev.get("id", "")
         if not eid:
             continue
+        eid = str(eid)
 
         ev_splits = {}
         for sp in ev.get("splits", []):
@@ -704,10 +707,11 @@ def _normalize_splits(raw_splits):
 
 
 def _merge_splits(events, splits_map):
-    """Attach splits data to each event."""
+    """Attach splits data to each event, matching by numeric_id or id."""
     for ev in events:
+        nid = ev.get("numeric_id", "")
         eid = ev.get("id", "")
-        ev["splits"] = splits_map.get(eid, {})
+        ev["splits"] = splits_map.get(nid) or splits_map.get(eid, {})
     return events
 
 

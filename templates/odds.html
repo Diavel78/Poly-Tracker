@@ -204,30 +204,46 @@
     }
 
     function renderSplitsRow(circa, dk, label, mktKey, awayName, homeName) {
-        // Extract away handle/bets from circa (primary) or dk (fallback)
+        // Prefer Circa, fall back to DK
         const src = circa?.[mktKey] || dk?.[mktKey];
         if (!src) return '';
+        const srcLabel = circa?.[mktKey] ? 'Circa' : 'DK';
 
-        const awayH = src.away_handle_pct ?? src.awayHandlePct;
-        const awayT = src.away_bets_pct ?? src.awayBetsPct;
+        let awayH, awayT, homeH, homeT;
+
+        if (mktKey === 'total') {
+            // Totals use over/under instead of away/home
+            awayH = src.over_handle_pct;
+            awayT = src.over_bets_pct;
+            homeH = src.under_handle_pct;
+            homeT = src.under_bets_pct;
+        } else {
+            awayH = src.away_handle_pct;
+            awayT = src.away_bets_pct;
+            homeH = src.home_handle_pct;
+            homeT = src.home_bets_pct;
+        }
+
         if (awayH == null && awayT == null) return '';
 
-        const homeH = awayH != null ? (100 - awayH) : null;
-        const homeT = awayT != null ? (100 - awayT) : null;
-
-        // Sharp signal: handle diverges from tickets by 15%+
-        const divergence = (awayH != null && awayT != null) ? Math.abs(awayH - awayT) : 0;
-        const isSharp = divergence >= 15;
-        const sharpSide = (awayH != null && awayT != null && awayH > awayT) ? awayName : homeName;
+        // Sharp signal: money diverges from bets by 15%+
+        const awayDiv = (awayH != null && awayT != null) ? awayH - awayT : 0;
+        const homeDiv = (homeH != null && homeT != null) ? homeH - homeT : 0;
+        const maxDiv = Math.max(Math.abs(awayDiv), Math.abs(homeDiv));
+        const isSharp = maxDiv >= 15;
+        const sharpSide = Math.abs(awayDiv) > Math.abs(homeDiv)
+            ? (awayDiv > 0 ? awayName : homeName)
+            : (homeDiv > 0 ? homeName : awayName);
 
         let h = `<div class="split-item">`;
         h += `<span class="sname">${label}</span>`;
 
+        // Away/Over side
+        h += `<span style="font-size:10px;color:#8b949e;min-width:30px">${esc(awayName.substring(0,3).toUpperCase())}</span>`;
         if (awayH != null) {
-            h += `<span class="split-pct" style="color:#8b949e">${awayName.substring(0,3).toUpperCase()}</span>`;
             h += `<div class="split-bar"><div class="split-fill-h" style="width:${awayH}%"></div></div>`;
             h += `<span class="split-pct sharp">${awayH}%</span>`;
-            h += `<span style="font-size:10px;color:#484f58;margin:0 2px">/</span>`;
+            h += `<span style="font-size:9px;color:#484f58">/</span>`;
             h += `<span class="split-pct public">${awayT != null ? awayT + '%' : '--'}</span>`;
         }
 
@@ -235,10 +251,7 @@
             h += `<span class="split-tag sharp-signal">SHARP ${esc(sharpSide.substring(0,3).toUpperCase())}</span>`;
         }
 
-        // Source label
-        const srcBook = circa?.[mktKey] ? 'Circa' : 'DK';
-        h += `<span style="font-size:9px;color:#484f58;margin-left:4px">${srcBook}</span>`;
-
+        h += `<span style="font-size:9px;color:#484f58;margin-left:4px">${srcLabel}</span>`;
         h += `</div>`;
         return h;
     }
