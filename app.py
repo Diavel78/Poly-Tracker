@@ -282,15 +282,13 @@ def compute_summary(enriched, parsed_activities, tz_offset_minutes=0):
     for act in parsed_activities:
         has_pnl = act["pnl"] is not None
         is_resolution = act["type"] == "Position Resolution"
-        is_trade_close = act["type"] == "Trade" and has_pnl
+        is_trade_close = act["type"] == "Trade" and act.get("_is_close") and has_pnl
 
-        if is_resolution and has_pnl:
+        if (is_resolution or is_trade_close) and has_pnl:
             realized_pnl += act["pnl"]
             resolved_total += 1
             if act["pnl"] > 0:
                 resolved_wins += 1
-        elif is_trade_close:
-            realized_pnl += act["pnl"]
 
         if (is_resolution or is_trade_close) and has_pnl:
             # Convert activity timestamp (UTC) to client's local date
@@ -470,16 +468,40 @@ def parse_activities(client, activities):
             "pnl": pnl,
         })
 
-    # Post-process: for trade sells, use SDK's realizedPnl directly.
-    # The SDK's price field can represent the complementary side of the market,
-    # so computing P&L from buy/sell prices ourselves is unreliable.
-    # SDK's realizedPnl is already set as act["pnl"] from the parsing step above.
-    # No further computation needed.
+    # Post-process: for trades where SDK didn't provide P&L, compute from
+    # tracked average cost. Activities come newest-first; process chronologically.
+    slug_positions = {}  # slug -> {"qty": float, "total_cost": float}
 
-    # Strip internal fields before returning
+    for i in range(len(parsed) - 1, -1, -1):
+        act = parsed[i]
+        if act["type"] != "Trade":
+            continue
+        slug = act["_market_slug"]
+        if not slug or act["price"] is None or not act["quantity"]:
+            continue
+
+        if slug not in slug_positions:
+            slug_positions[slug] = {"qty": 0.0, "total_cost": 0.0}
+        pos = slug_positions[slug]
+
+        if not act["_is_close"]:
+            # Buy/open: accumulate cost
+            pos["qty"] += act["quantity"]
+            pos["total_cost"] += act["price"] * act["quantity"]
+        else:
+            # Sell/close: if SDK already gave us P&L, use it; otherwise compute
+            if act["pnl"] is None and pos["qty"] > 0:
+                avg_cost = pos["total_cost"] / pos["qty"]
+                act["pnl"] = round((act["price"] - avg_cost) * act["quantity"], 2)
+            # Reduce tracked position regardless
+            if pos["qty"] > 0:
+                avg_cost = pos["total_cost"] / pos["qty"]
+                pos["total_cost"] -= avg_cost * min(act["quantity"], pos["qty"])
+                pos["qty"] -= min(act["quantity"], pos["qty"])
+
+    # Strip internal fields before returning (keep _is_close for compute_summary)
     for act in parsed:
         act.pop("_market_slug", None)
-        act.pop("_is_close", None)
 
     return parsed
 
@@ -656,10 +678,14 @@ def api_data():
     open_positions = [p for p in enriched if not p.get("expired")]
     closed_positions = [a for a in parsed_acts
                         if a["type"] == "Position Resolution"
-                        or (a["type"] == "Trade" and a.get("pnl") is not None)]
+                        or (a["type"] == "Trade" and a.get("_is_close") and a.get("pnl") is not None)]
 
     tz_offset = request.args.get("tz", 0, type=int)
     summary = compute_summary(enriched, parsed_acts, tz_offset_minutes=tz_offset)
+
+    # Strip internal fields before sending to frontend
+    for act in parsed_acts:
+        act.pop("_is_close", None)
 
     return jsonify({
         "ok": True,
