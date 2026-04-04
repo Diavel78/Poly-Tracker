@@ -121,17 +121,17 @@
         /* Splits */
         .splits{padding:6px 14px;background:#0d1117;border-top:1px solid #f0883e33}
         .splits-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#f0883e}
-        .splits-grid{display:grid;grid-template-columns:40px 40px 40px 1fr auto auto auto;gap:0;padding:0 14px 8px;background:#0d1117;align-items:center;font-size:11px;row-gap:4px}
-        .sg-mkt{color:#8b949e;font-weight:600;font-size:10px}
-        .sg-team{color:#8b949e;font-size:10px}
-        .sg-bar{height:5px;border-radius:3px;overflow:hidden;background:#21262d;min-width:50px;max-width:100px}
-        .sg-fill{background:#f0883e;height:100%}
-        .sg-handle{font-weight:700;font-size:11px;color:#f0883e;text-align:right}
-        .sg-bets{font-weight:700;font-size:11px;color:#58a6ff;text-align:right}
-        .sg-tag{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px}
-        .sg-tag.sharp{background:#f0883e22;color:#f0883e;border:1px solid #f0883e44}
-        .sg-src{font-size:9px;color:#484f58}
-        .sg-sep{color:#484f58;font-size:10px;text-align:center}
+        .splits-rows{padding:2px 14px 8px;background:#0d1117}
+        .split-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px}
+        .sr-mkt{color:#8b949e;font-weight:600;min-width:28px}
+        .sr-team{color:#8b949e;min-width:28px}
+        .sr-bar{height:5px;width:60px;border-radius:3px;overflow:hidden;background:#21262d}
+        .sr-fill{background:#f0883e;height:100%}
+        .sr-handle{font-weight:700;color:#f0883e;min-width:32px;text-align:right}
+        .sr-sep{color:#484f58}
+        .sr-bets{font-weight:700;color:#58a6ff;min-width:32px;text-align:right}
+        .sr-tag{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;margin-left:4px;background:#f0883e22;color:#f0883e;border:1px solid #f0883e44}
+        .sr-src{font-size:9px;color:#484f58;margin-left:4px}
 
         /* Movement row */
         .mv-row{display:flex;gap:16px;padding:4px 14px;background:#0d1117;flex-wrap:wrap;align-items:baseline}
@@ -485,19 +485,18 @@
         const sharpSide = (awayH != null && awayT != null && awayH > awayT) ? awayName
             : (homeH != null && homeT != null && homeH > homeT) ? homeName : '';
 
-        // Grid row: MKT | TEAM | BAR | HANDLE% | / | BETS% | SHARP TAG
-        let h = '';
-        h += `<span class="sg-mkt">${label}</span>`;
-        h += `<span class="sg-team">${esc(awayName.substring(0,3).toUpperCase())}</span>`;
-        h += `<span><div class="sg-bar"><div class="sg-fill" style="width:${awayH||0}%"></div></div></span>`;
-        h += `<span class="sg-handle">${awayH != null ? awayH + '%' : '--'}</span>`;
-        h += `<span class="sg-sep">/</span>`;
-        h += `<span class="sg-bets">${awayT != null ? awayT + '%' : '--'}</span>`;
+        let h = `<div class="split-row">`;
+        h += `<span class="sr-mkt">${label}</span>`;
+        h += `<span class="sr-team">${esc(awayName.substring(0,3).toUpperCase())}</span>`;
+        h += `<div class="sr-bar"><div class="sr-fill" style="width:${awayH||0}%"></div></div>`;
+        h += `<span class="sr-handle">${awayH != null ? awayH + '%' : '--'}</span>`;
+        h += `<span class="sr-sep">/</span>`;
+        h += `<span class="sr-bets">${awayT != null ? awayT + '%' : '--'}</span>`;
         if (isSharp && sharpSide) {
-            h += `<span class="sg-tag sharp">${esc(sharpSide.substring(0,3).toUpperCase())}</span>`;
-        } else {
-            h += `<span class="sg-src">${srcLabel}</span>`;
+            h += `<span class="sr-tag">SHARP ${esc(sharpSide.substring(0,3).toUpperCase())}</span>`;
         }
+        h += `<span class="sr-src">${srcLabel}</span>`;
+        h += `</div>`;
         return h;
     }
 
@@ -741,7 +740,7 @@
                 // Splits on separate row
                 if (circa || dk) {
                     h += `<div class="splits"><span class="splits-label">Splits</span></div>`;
-                    h += `<div class="splits-grid">`;
+                    h += `<div class="splits-rows">`;
                     h += renderSplitsRow(circa, dk, 'ML', 'moneyline', away, home);
                     h += renderSplitsRow(circa, dk, 'SPR', 'spread', away, home);
                     h += renderSplitsRow(circa, dk, 'TOT', 'total', 'Over', 'Under');
