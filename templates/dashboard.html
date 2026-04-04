@@ -542,7 +542,9 @@
 
             for (const c of closed) {
                 let result = '';
-                if (c.pnl !== null && c.pnl > 0) {
+                if (c.type === 'Trade') {
+                    result = '<span style="color:#58a6ff;font-weight:700">Sold</span>';
+                } else if (c.pnl !== null && c.pnl > 0) {
                     result = '<span style="color:#3fb950;font-weight:700">W</span>';
                 } else if (c.pnl !== null && c.pnl < 0) {
                     result = '<span style="color:#f85149;font-weight:700">L</span>';

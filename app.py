@@ -631,7 +631,9 @@ def api_data():
     parsed_acts.sort(key=lambda a: a.get("timestamp", ""), reverse=True)
 
     open_positions = [p for p in enriched if not p.get("expired")]
-    closed_positions = [a for a in parsed_acts if a["type"] == "Position Resolution"]
+    closed_positions = [a for a in parsed_acts
+                        if a["type"] == "Position Resolution"
+                        or (a["type"] == "Trade" and a.get("pnl") is not None)]
 
     tz_offset = request.args.get("tz", 0, type=int)
     summary = compute_summary(enriched, parsed_acts, tz_offset_minutes=tz_offset)
