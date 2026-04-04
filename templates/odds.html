@@ -634,7 +634,15 @@
         if (query) events = events.filter(e => (e.home_team + ' ' + e.away_team).toLowerCase().includes(query));
 
         // Hide games with zero odds across all enabled books
-        events = events.filter(e => hasAnyOdds(e, books));
+        const withOdds = events.filter(e => hasAnyOdds(e, books));
+        // If filtering removed everything but we have events, books selection might be wrong
+        if (withOdds.length) {
+            events = withOdds;
+        } else if (events.length && books.length) {
+            // Check against ALL available books instead
+            const allBooks = oddsData.books || [];
+            events = events.filter(e => hasAnyOdds(e, allBooks));
+        }
 
         if(!events.length){
             const msg=oddsData.meta_message?esc(oddsData.meta_message):'No games found';
@@ -803,6 +811,13 @@
             }
             oddsData=data;
             firstLoad=false;
+            // If enabled books have no overlap with available, reset to all
+            const avail = new Set(data.books||[]);
+            const overlap = [...enabledBooks].filter(b=>avail.has(b));
+            if(!overlap.length && avail.size){
+                enabledBooks = new Set(avail);
+                saveBookPrefs();
+            }
             // Capture Pinnacle opening lines for today
             currentOpeners = captureOpeners(data.events||[], activeSport);
             const n=(data.events||[]).length;
