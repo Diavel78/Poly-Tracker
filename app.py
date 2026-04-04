@@ -767,7 +767,8 @@ def _fetch_splits(sport):
         raw = _owls_get(f"/{sport}/splits")
         _owls_cache[cache_key] = {"data": raw, "ts": now}
         return raw, False
-    except Exception:
+    except Exception as e:
+        print(f"SPLITS ERROR: {e}")
         return {}, False
 
 
@@ -934,9 +935,16 @@ def api_odds():
         errors.append(f"{sport}: {e}")
 
     # Fetch splits and merge (MVP plan)
+    splits_debug = {}
     try:
         raw_splits, _ = _fetch_splits(sport)
         splits_map, splits_by_teams = _normalize_splits(raw_splits)
+        splits_debug = {
+            "by_id_count": len(splits_map),
+            "by_teams_count": len(splits_by_teams),
+            "sample_teams": [str(k) for k in list(splits_by_teams.keys())[:3]],
+            "event_teams": [frozenset([e.get("away_team","").lower(), e.get("home_team","").lower()]) for e in events[:3]],
+        }
         events = _merge_splits(events, splits_map, splits_by_teams)
     except Exception as e:
         errors.append(f"splits: {e}")
@@ -965,6 +973,7 @@ def api_odds():
         "books": sorted(active_books, key=lambda b: (0 if b == "circa" else 1 if b == "pinnacle" else 2, b)),
         "leagues": sorted(leagues),
         "meta_message": meta_message,
+        "splits_debug": splits_debug,
         "errors": errors,
     })
 
