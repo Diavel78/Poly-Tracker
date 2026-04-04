@@ -911,6 +911,23 @@ def api_splits_raw():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/scores/raw")
+@login_required
+def api_scores_raw():
+    """Debug: raw live scores response."""
+    if not OWLS_INSIGHT_API_KEY:
+        return jsonify({"error": "no key"}), 500
+    sport = request.args.get("sport", "")
+    try:
+        if sport:
+            raw = _owls_get(f"/scores/live", {"sport": sport})
+        else:
+            raw = _owls_get(f"/scores/live")
+        return jsonify(raw)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/realtime/raw")
 @login_required
 def api_realtime_raw():
