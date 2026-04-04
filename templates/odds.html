@@ -122,7 +122,7 @@
         .splits{padding:6px 14px;background:#0d1117;border-top:1px solid #f0883e33}
         .splits-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#f0883e}
         .splits-rows{padding:2px 14px 8px;background:#0d1117}
-        .split-row{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11px;overflow:hidden}
+        .split-row{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11px}
         .sr-mkt{color:#8b949e;font-weight:600;min-width:28px}
         .sr-team{color:#8b949e;min-width:28px}
         .sr-bar{height:5px;width:60px;border-radius:3px;overflow:hidden;background:#21262d}
@@ -463,9 +463,10 @@
     });
 
     function renderSplitsRow(circa, dk, label, mktKey, awayName, homeName) {
-        const src = circa?.[mktKey] || dk?.[mktKey];
+        // Circa ONLY — DK splits are worthless
+        const src = circa?.[mktKey];
         if (!src) return '';
-        const srcLabel = circa?.[mktKey] ? 'Circa' : 'DK';
+        const srcLabel = 'Circa';
 
         let awayH, awayT;
         if (mktKey === 'total') {
