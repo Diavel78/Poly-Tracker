@@ -18,7 +18,7 @@
         .nav-link:hover{color:#c9d1d9;background:#21262d}
         .nav-link.active{color:#fff;background:#1f6feb}
         .nav-right{display:flex;align-items:center;gap:10px}
-        .status{font-size:11px;color:#8b949e}
+        .status{font-size:11px;color:#8b949e;min-height:16px;white-space:nowrap}
         .status.loading{color:#d29922}
         .status.error{color:#f85149}
         .btn-sm{padding:5px 12px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;font-size:12px;cursor:pointer;text-decoration:none}
@@ -548,38 +548,45 @@
         board.innerHTML=h;
     }
 
-    async function loadOdds(){
+    let firstLoad = true;
+    async function loadOdds(showLoading){
         const status=$('status');
-        status.textContent='Loading...';
-        status.className='status loading';
+        if(showLoading || firstLoad){
+            status.textContent='Loading...';
+            status.className='status loading';
+        }
         try{
             const resp=await fetch(`/api/odds?sport=${activeSport}`);
             const data=await resp.json();
             if(!data.ok){
                 status.textContent=data.error||'Error';
                 status.className='status error';
-                $('board').innerHTML=`<div class="empty-state">${esc(data.error||'API error')}</div>`;
+                if(firstLoad) $('board').innerHTML=`<div class="empty-state">${esc(data.error||'API error')}</div>`;
                 return;
             }
             oddsData=data;
-            const now=new Date();
-            const ct=data.cached?' (cached)':'';
-            status.textContent=`${(data.events||[]).length} games · ${now.toLocaleTimeString()}${ct}`;
+            firstLoad=false;
+            const n=(data.events||[]).length;
+            const t=new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'});
+            status.textContent=`${n} games · ${t}`;
             status.className='status';
             renderBookPills();
             renderBoard();
         }catch(err){
-            status.textContent='Fetch error';
-            status.className='status error';
+            if(firstLoad){
+                status.textContent='Fetch error';
+                status.className='status error';
+            }
             console.error(err);
         }
     }
 
     function setSport(s){
         activeSport=s;
+        firstLoad=true;
         localStorage.setItem('odds_sport',s);
         renderSportBar();
-        loadOdds();
+        loadOdds(true);
     }
 
     renderSportBar();
