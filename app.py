@@ -931,23 +931,37 @@ def api_my_bets():
 
             meta = pos.get("marketMetadata", {})
             market_name = meta.get("title", "")
+            market_slug = meta.get("slug") or slug
             team = meta.get("team") or {}
             team_name = team.get("name", "") if isinstance(team, dict) else ""
-            outcome = meta.get("outcome", "")
+            raw_outcome = meta.get("outcome", "")
             event_slug = meta.get("eventSlug", "")
 
-            cost = _safe_float(pos.get("cost"))
-            quantity = abs(net)
+            # Build pick label (same logic as enrich_positions)
+            pick = raw_outcome
+            if team_name and raw_outcome and re.search(r'[0-9]', raw_outcome):
+                pick = f"{team_name} {raw_outcome}"
+            elif raw_outcome.lower() in ("over", "under"):
+                # Fetch market detail for the total number
+                try:
+                    md_raw = fetch_market(client, market_slug)
+                    md = md_raw.get("market", md_raw) if md_raw and isinstance(md_raw, dict) else {}
+                    question = md.get("question", "")
+                    total_match = re.search(r'(\d+\.?\d*)', question)
+                    if total_match:
+                        pick = f"{raw_outcome} {total_match.group(1)}"
+                except Exception:
+                    pass
+            elif team_name:
+                pick = team_name
 
             bets.append({
                 "slug": slug,
                 "event_slug": event_slug,
                 "market_name": market_name,
                 "team_name": team_name,
-                "outcome": outcome,
+                "pick": pick,
                 "side": "YES" if net > 0 else "NO",
-                "quantity": quantity,
-                "cost": cost,
             })
     except Exception as e:
         return jsonify({"ok": False, "bets": [], "error": str(e)})

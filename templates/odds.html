@@ -591,9 +591,8 @@
     }
 
     function renderBetTag(bet) {
-        const pick = bet.team_name || bet.outcome || '?';
-        const cost = bet.cost != null ? ' $' + bet.cost.toFixed(2) : '';
-        return `<span class="my-bet-tag"><span class="check">&#10003;</span>POLY: ${esc(pick)}${cost}</span>`;
+        const pick = bet.pick || bet.team_name || '?';
+        return `<span class="my-bet-tag"><span class="check">&#10003;</span>POLY: ${esc(pick)}</span>`;
     }
 
     let myBets = []; // Active Polymarket positions
