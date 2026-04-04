@@ -132,6 +132,12 @@
         .sg-tag.sharp{background:#f0883e22;color:#f0883e;border:1px solid #f0883e44}
         .sg-src{font-size:9px;color:#484f58}
         .sg-sep{color:#484f58;font-size:10px;text-align:center}
+
+        /* Movement row */
+        .mv-row{display:flex;gap:16px;padding:4px 14px;background:#0d1117;flex-wrap:wrap;align-items:baseline}
+        .mv-item{display:inline-flex;align-items:baseline;gap:4px;font-size:12px}
+        .mv-label{color:#8b949e;font-weight:600;font-size:11px}
+        .mv-team{color:#8b949e;font-size:11px}
         .rlm-tag{font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;background:#f8514922;color:#f85149;border:1px solid #f8514944;margin-left:8px;animation:rlm-pulse 2s infinite}
         @keyframes rlm-pulse{0%,100%{opacity:1}50%{opacity:.6}}
 
@@ -500,17 +506,17 @@
         const awayData = data[awayName];
         if (!awayData) return '';
 
-        let h = `<div class="split-item"><span class="sname">${label}</span>`;
+        let h = `<span class="mv-item"><span class="mv-label">${label}</span>`;
 
         if (mktKey === 'ml') {
             const diff = awayData.diff;
             const arrow = diff > 0 ? '&#9650;' : diff < 0 ? '&#9660;' : '';
             const color = diff > 0 ? '#3fb950' : diff < 0 ? '#f85149' : '#8b949e';
-            h += `<span style="font-size:10px;color:#8b949e">${esc(awayName.substring(0,3).toUpperCase())}</span>`;
-            h += `<span style="font-size:11px;color:#8b949e">${fmt(awayData.open)}</span>`;
-            h += `<span style="font-size:10px;color:${color};margin:0 2px">${arrow}</span>`;
-            h += `<span style="font-size:11px;font-weight:700;color:${color}">${fmt(awayData.current)}</span>`;
-            if (diff !== 0) h += `<span style="font-size:9px;color:${color};margin-left:2px">(${diff > 0 ? '+' : ''}${diff})</span>`;
+            h += `<span class="mv-team">${esc(awayName.substring(0,3).toUpperCase())}</span> `;
+            h += `<span style="color:#8b949e">${fmt(awayData.open)}</span> `;
+            h += `<span style="color:${color}">${arrow}</span> `;
+            h += `<span style="font-weight:700;color:${color}">${fmt(awayData.current)}</span>`;
+            if (diff !== 0) h += ` <span style="font-size:10px;color:${color}">(${diff > 0 ? '+' : ''}${diff})</span>`;
         } else if (mktKey === 'spread') {
             const ptDiff = awayData.point_diff;
             const pxDiff = awayData.price_diff;
@@ -518,18 +524,18 @@
             const color = changed ? '#d29922' : '#8b949e';
             const pt = awayData.current_point;
             const ptStr = pt > 0 ? '+' + pt : '' + pt;
-            h += `<span style="font-size:10px;color:#8b949e">${esc(awayName.substring(0,3).toUpperCase())}</span>`;
-            h += `<span style="font-size:11px;color:${color};font-weight:${changed?700:400}">${ptStr} ${fmt(awayData.current_price)}</span>`;
-            if (ptDiff !== 0) h += `<span style="font-size:9px;color:${color};margin-left:2px">(${ptDiff > 0 ? '+' : ''}${ptDiff})</span>`;
+            h += `<span class="mv-team">${esc(awayName.substring(0,3).toUpperCase())}</span> `;
+            h += `<span style="color:${color};font-weight:${changed?700:400}">${ptStr} ${fmt(awayData.current_price)}</span>`;
+            if (ptDiff !== 0) h += ` <span style="font-size:10px;color:${color}">(${ptDiff > 0 ? '+' : ''}${ptDiff})</span>`;
         } else if (mktKey === 'total') {
             const ptDiff = awayData.point_diff;
             const changed = ptDiff !== 0 || awayData.price_diff !== 0;
             const color = changed ? '#d29922' : '#8b949e';
-            h += `<span style="font-size:11px;color:${color};font-weight:${changed?700:400}">O ${awayData.current_point} ${fmt(awayData.current_price)}</span>`;
-            if (ptDiff !== 0) h += `<span style="font-size:9px;color:${color};margin-left:2px">(${ptDiff > 0 ? '+' : ''}${ptDiff})</span>`;
+            h += `<span style="color:${color};font-weight:${changed?700:400}">O ${awayData.current_point} ${fmt(awayData.current_price)}</span>`;
+            if (ptDiff !== 0) h += ` <span style="font-size:10px;color:${color}">(${ptDiff > 0 ? '+' : ''}${ptDiff})</span>`;
         }
 
-        h += `</div>`;
+        h += `</span>`;
         return h;
     }
 
@@ -719,22 +725,18 @@
             const hasMv = Object.keys(mv.ml||{}).length || Object.keys(mv.spread||{}).length;
 
             if (hasMv || circa || dk || rlmSide) {
-                h += `<div class="splits">`;
-
-                // Pinnacle movement
+                // Line movement
                 if (hasMv) {
-                    h += `<span class="splits-label">${mv.src || 'PIN'}</span>`;
+                    h += `<div class="mv-row">`;
+                    h += `<span class="splits-label">${mv.src || 'CIR'}</span>`;
                     h += renderMovement(mv, 'ML', 'ml', away, home);
                     h += renderMovement(mv, 'SPR', 'spread', away, home);
                     h += renderMovement(mv, 'TOT', 'total', 'Over', 'Under');
+                    if (rlmSide) {
+                        h += `<span class="rlm-tag">RLM ${esc(rlmSide.substring(0,3).toUpperCase())}</span>`;
+                    }
+                    h += `</div>`;
                 }
-
-                // Reverse line flag
-                if (rlmSide) {
-                    h += `<span class="rlm-tag">RLM ${esc(rlmSide.substring(0,3).toUpperCase())}</span>`;
-                }
-
-                h += `</div>`;
 
                 // Splits on separate row
                 if (circa || dk) {
