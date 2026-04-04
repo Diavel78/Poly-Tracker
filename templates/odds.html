@@ -69,7 +69,13 @@
         .stale-tag{font-size:9px;color:#d29922;background:#d2992222;padding:2px 6px;border-radius:3px;margin-left:6px}
         .my-bet-tag{font-size:9px;font-weight:700;padding:3px 8px;border-radius:4px;background:#6e56cf22;color:#a78bfa;border:1px solid #6e56cf44;margin-left:6px;display:inline-flex;align-items:center;gap:4px}
         .my-bet-tag .check{font-size:12px}
+        .my-bet-tag.winning{background:#3fb95022;color:#3fb950;border-color:#3fb95044}
+        .my-bet-tag.losing{background:#d2992222;color:#d29922;border-color:#d2992244}
+        .my-bet-tag.dead{background:#f8514922;color:#f85149;border-color:#f8514944}
         .game.has-bet{border-color:#6e56cf66}
+        .game.has-bet.bet-winning{border-color:#3fb95066}
+        .game.has-bet.bet-losing{border-color:#d2992266}
+        .game.has-bet.bet-dead{border-color:#f8514966}
         .game.has-bet .ghdr{border-bottom-color:#6e56cf44}
 
         .gtable{width:100%;border-collapse:collapse}
@@ -431,7 +437,8 @@
             const isLive = sc && sc.live;
             const liveClass = isLive ? ' live' : '';
             const myBet = findMyBet(ev);
-            const betClass = myBet ? ' has-bet' : '';
+            const betStatus = myBet ? getBetStatus(myBet, ev) : '';
+            const betClass = myBet ? ' has-bet' + (betStatus ? ' bet-' + betStatus : '') : '';
 
             h+=`<div class="game${betClass}"><div class="ghdr${liveClass}">`;
             if (isLive) {
@@ -443,11 +450,11 @@
                 const gameState = sc.display_status || sc.period || sc.clock || '';
                 if (gameState) h+=`<span class="game-status">${esc(gameState)}</span>`;
                 h+=`<span class="stale-tag">pre-game odds</span>`;
-                if (myBet) h+=renderBetTag(myBet);
+                if (myBet) h+=renderBetTag(myBet, ev);
                 h+=`</span>`;
             } else {
                 h+=`<span>${league}${esc(away)} @ ${esc(home)}`;
-                if (myBet) h+=renderBetTag(myBet);
+                if (myBet) h+=renderBetTag(myBet, ev);
                 h+=`</span>`;
             }
             h+=`<span class="gt">${esc(date)} ${esc(time)}</span></div>`;
@@ -591,12 +598,77 @@
         }
     }
 
-    function renderBetTag(bet) {
+    function getBetStatus(bet, ev) {
+        // Returns: 'winning', 'losing', 'dead', or '' (no score/can't determine)
+        const sc = ev.score;
+        if (!sc || !sc.live) return '';
+
+        const awayScore = sc.away_score ?? 0;
+        const homeScore = sc.home_score ?? 0;
+        const total = awayScore + homeScore;
+        const pick = (bet.pick || '').toLowerCase();
+        const away = (ev.away_team || '').toLowerCase();
+        const home = (ev.home_team || '').toLowerCase();
+        const teamName = (bet.team_name || '').toLowerCase();
+
+        // Over/Under
+        const overMatch = pick.match(/^over\s+([\d.]+)/i);
+        if (overMatch) {
+            const line = parseFloat(overMatch[1]);
+            if (total > line) return 'winning';
+            return 'losing';
+        }
+        const underMatch = pick.match(/^under\s+([\d.]+)/i);
+        if (underMatch) {
+            const line = parseFloat(underMatch[1]);
+            if (total > line) return 'dead';  // can't win
+            if (total === line) return 'losing';
+            return 'winning';
+        }
+
+        // Spread (e.g., "Tigers -1.5" or "Cardinals +1.5")
+        const spreadMatch = pick.match(/(.+?)\s+([+-][\d.]+)$/);
+        if (spreadMatch) {
+            const spreadTeam = spreadMatch[1].toLowerCase();
+            const line = parseFloat(spreadMatch[2]);
+            let teamScore, oppScore;
+            if (away.includes(spreadTeam) || spreadTeam.includes(away.split(' ').pop())) {
+                teamScore = awayScore; oppScore = homeScore;
+            } else {
+                teamScore = homeScore; oppScore = awayScore;
+            }
+            const margin = teamScore - oppScore + line;
+            if (margin > 0) return 'winning';
+            if (margin === 0) return 'losing';
+            return 'dead';
+        }
+
+        // Moneyline (team name)
+        if (teamName) {
+            let teamScore, oppScore;
+            if (away.includes(teamName) || teamName.includes(away.split(' ').pop())) {
+                teamScore = awayScore; oppScore = homeScore;
+            } else if (home.includes(teamName) || teamName.includes(home.split(' ').pop())) {
+                teamScore = homeScore; oppScore = awayScore;
+            } else {
+                return '';
+            }
+            if (teamScore > oppScore) return 'winning';
+            if (teamScore === oppScore) return 'losing';
+            return 'losing';  // losing but not dead in ML
+        }
+
+        return '';
+    }
+
+    function renderBetTag(bet, ev) {
         const pick = bet.pick || bet.team_name || '?';
         const odds = bet.entry_american != null
             ? ` (${bet.entry_american > 0 ? '+' : ''}${bet.entry_american})`
             : '';
-        return `<span class="my-bet-tag"><span class="check">&#10003;</span>POLY: ${esc(pick)}${odds}</span>`;
+        const status = ev ? getBetStatus(bet, ev) : '';
+        const statusClass = status ? ' ' + status : '';
+        return `<span class="my-bet-tag${statusClass}"><span class="check">&#10003;</span>POLY: ${esc(pick)}${odds}</span>`;
     }
 
     let myBets = []; // Active Polymarket positions
