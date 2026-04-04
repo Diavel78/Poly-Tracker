@@ -66,6 +66,7 @@
         .score-display .score-sep{color:#484f58;margin:0 4px}
         .score-display .score-home{color:#e6edf3}
         .game-status{font-size:10px;color:#8b949e;margin-left:6px}
+        .stale-tag{font-size:9px;color:#d29922;background:#d2992222;padding:2px 6px;border-radius:3px;margin-left:6px}
 
         .gtable{width:100%;border-collapse:collapse}
         .gtable th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#484f58;padding:4px 6px;background:#0d1117;border-bottom:1px solid #21262d;text-align:center}
@@ -434,6 +435,7 @@
                 h+=`<span class="score-home">${sc.home_score ?? '-'}</span></span> `;
                 h+=`${esc(home)}`;
                 if (sc.period || sc.clock) h+=`<span class="game-status">${esc(sc.period)}${sc.clock ? ' ' + esc(sc.clock) : ''}</span>`;
+                h+=`<span class="stale-tag">pre-game odds</span>`;
                 h+=`</span>`;
             } else {
                 h+=`<span>${league}${esc(away)} @ ${esc(home)}</span>`;

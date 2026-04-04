@@ -671,39 +671,67 @@ def _fetch_scores(sport):
 
 
 def _merge_scores(events, raw_scores, sport):
-    """Match live scores to events by team names."""
+    """Match live scores to events by team names (order-independent)."""
     sport_scores = raw_scores.get("data", {}).get("sports", {}).get(sport, [])
     if not sport_scores:
         return events
 
-    # Build lookup: normalize team name -> score data
-    scores_by_teams = {}
+    # Build lookup: frozenset of team names -> score data
+    scores_lookup = []
     for game in sport_scores:
         away_info = game.get("away", {})
         home_info = game.get("home", {})
-        away_name = away_info.get("team", {}).get("displayName", "")
-        home_name = home_info.get("team", {}).get("displayName", "")
-        away_score = away_info.get("score")
-        home_score = home_info.get("score")
-        status = game.get("status", {})
-        period = game.get("period") or game.get("inning") or ""
-        clock = game.get("clock") or game.get("displayClock") or ""
+        away_team = away_info.get("team", {})
+        home_team = home_info.get("team", {})
+        away_name = away_team.get("displayName", "")
+        home_name = home_team.get("displayName", "")
 
-        if away_name and home_name:
-            key = f"{away_name.lower()}@{home_name.lower()}"
-            scores_by_teams[key] = {
-                "away_score": away_score,
-                "home_score": home_score,
-                "status": status if isinstance(status, str) else status.get("type", {}).get("description", ""),
-                "period": str(period),
-                "clock": str(clock),
-                "live": True,
-            }
+        status_obj = game.get("status", {})
+        state = ""
+        if isinstance(status_obj, dict):
+            state = status_obj.get("state") or status_obj.get("type", {}).get("description", "")
+        elif isinstance(status_obj, str):
+            state = status_obj
+
+        scores_lookup.append({
+            "teams": frozenset([away_name.lower(), home_name.lower()]),
+            "away_name": away_name,
+            "home_name": home_name,
+            "away_score": away_info.get("score"),
+            "home_score": home_info.get("score"),
+            "away_logo": away_team.get("logoUrl", ""),
+            "home_logo": home_team.get("logoUrl", ""),
+            "state": state,
+            "period": str(game.get("period") or game.get("inning") or ""),
+            "clock": str(game.get("displayClock") or game.get("clock") or ""),
+        })
 
     for ev in events:
-        key = f"{ev.get('away_team', '').lower()}@{ev.get('home_team', '').lower()}"
-        if key in scores_by_teams:
-            ev["score"] = scores_by_teams[key]
+        ev_teams = frozenset([ev.get("away_team", "").lower(), ev.get("home_team", "").lower()])
+        for sc in scores_lookup:
+            if ev_teams == sc["teams"]:
+                # Map scores back to odds-feed home/away orientation
+                ev_away = ev.get("away_team", "").lower()
+                if sc["away_name"].lower() == ev_away:
+                    ev["score"] = {
+                        "away_score": sc["away_score"],
+                        "home_score": sc["home_score"],
+                        "state": sc["state"],
+                        "period": sc["period"],
+                        "clock": sc["clock"],
+                        "live": sc["state"] in ("in", "live", "In Progress"),
+                    }
+                else:
+                    # Swapped — flip scores to match odds orientation
+                    ev["score"] = {
+                        "away_score": sc["home_score"],
+                        "home_score": sc["away_score"],
+                        "state": sc["state"],
+                        "period": sc["period"],
+                        "clock": sc["clock"],
+                        "live": sc["state"] in ("in", "live", "In Progress"),
+                    }
+                break
 
     return events
 
