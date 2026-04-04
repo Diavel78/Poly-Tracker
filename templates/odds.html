@@ -47,6 +47,15 @@
         /* Game card — sportsbook style */
         .game{background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:10px;overflow:hidden}
         .game-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+        /* Best + Books side-by-side layout */
+        .best-and-books{display:flex;align-items:stretch}
+        .best-col{flex:0 0 auto;min-width:280px;border-right:2px solid #1f6feb33}
+        .best-col .gtable th{background:#0d1117}
+        .best-col .gtable th:first-child{padding-left:14px}
+        .best-td{position:relative;padding:6px 8px !important;text-align:center;vertical-align:middle}
+        .best-book{display:block;font-size:9px;font-weight:600;color:#1f6feb;margin-top:1px}
+        .books-col{flex:1;min-width:0;overflow:hidden}
         .ghdr{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;font-size:11px;color:#8b949e;border-bottom:1px solid #21262d}
         .ghdr .gt{font-weight:600;color:#58a6ff}
 
@@ -98,6 +107,9 @@
             .gtable th,.oc{font-size:11px}
             .gtable td:first-child{font-size:12px;padding:6px 10px}
             .oc{min-width:48px;padding:4px 2px}
+            .best-and-books{flex-direction:column}
+            .best-col{min-width:100%;border-right:none;border-bottom:2px solid #1f6feb33}
+            .books-col{width:100%}
         }
     </style>
 </head>
@@ -231,6 +243,78 @@
         return h;
     }
 
+    // Find best odds across all enabled books for each market/side
+    function findBestOdds(ev, books, away, home) {
+        const result = {
+            ml_away: null, ml_home: null,
+            spr_away: null, spr_home: null,
+            tot_over: null, tot_under: null,
+        };
+
+        for (const bk of books) {
+            const bd = (ev.books || {})[bk];
+            if (!bd) continue;
+            const label = BL[bk] || bk;
+
+            // ML: higher price = better for bettor
+            const mla = bd.moneyline?.[away];
+            if (mla != null && (result.ml_away == null || mla > result.ml_away.price))
+                result.ml_away = { price: mla, book: label };
+
+            const mlh = bd.moneyline?.[home];
+            if (mlh != null && (result.ml_home == null || mlh > result.ml_home.price))
+                result.ml_home = { price: mlh, book: label };
+
+            // Spread: higher price at same point = better; more favorable point = better
+            const spa = bd.spread?.[away];
+            if (spa?.price != null) {
+                if (result.spr_away == null ||
+                    spa.point > result.spr_away.point ||
+                    (spa.point === result.spr_away.point && spa.price > result.spr_away.price))
+                    result.spr_away = { price: spa.price, point: spa.point, book: label };
+            }
+
+            const sph = bd.spread?.[home];
+            if (sph?.price != null) {
+                if (result.spr_home == null ||
+                    sph.point > result.spr_home.point ||
+                    (sph.point === result.spr_home.point && sph.price > result.spr_home.price))
+                    result.spr_home = { price: sph.price, point: sph.point, book: label };
+            }
+
+            // Total: higher price at same point = better
+            const tov = bd.total?.['Over'];
+            if (tov?.price != null) {
+                if (result.tot_over == null ||
+                    (tov.point === result.tot_over.point && tov.price > result.tot_over.price) ||
+                    (tov.point < result.tot_over.point))
+                    result.tot_over = { price: tov.price, point: tov.point, book: label };
+            }
+
+            const tun = bd.total?.['Under'];
+            if (tun?.price != null) {
+                if (result.tot_under == null ||
+                    (tun.point === result.tot_under.point && tun.price > result.tot_under.price) ||
+                    (tun.point > result.tot_under.point))
+                    result.tot_under = { price: tun.price, point: tun.point, book: label };
+            }
+        }
+        return result;
+    }
+
+    function bestCell(b) {
+        if (!b) return `<td class="best-td"><span class="oc na">--</span></td>`;
+        return `<td class="best-td"><span class="oc ${cls(b.price)}">${fmt(b.price)}</span><span class="best-book">${esc(b.book)}</span></td>`;
+    }
+
+    function bestCellPt(b, prefix) {
+        if (!b) return `<td class="best-td"><span class="oc na">--</span></td>`;
+        const ptStr = prefix
+            ? `${prefix} ${b.point}`
+            : (b.point > 0 ? '+' + b.point : '' + b.point);
+        return `<td class="best-td"><span class="oc ${cls(b.price)}"><span class="pt">${ptStr}</span>${fmt(b.price)}</span><span class="best-book">${esc(b.book)}</span></td>`;
+    }
+
     function hasAnyOdds(ev, books) {
         for (const bk of books) {
             const bd = (ev.books || {})[bk];
@@ -268,7 +352,6 @@
         }
         $('info').textContent=events.length+' games';
 
-        // Column headers: Team | Book1(ML SPR TOT) | Book2(ML SPR TOT) ...
         let h='';
         for(const ev of events){
             const home=ev.home_team||'';
@@ -276,59 +359,30 @@
             const time=localTime(ev.commence_time);
             const date=localDate(ev.commence_time);
             const league=ev.league?esc(ev.league)+' · ':'';
+            const best = findBestOdds(ev, books, away, home);
 
             h+=`<div class="game"><div class="ghdr"><span>${league}${esc(away)} @ ${esc(home)}</span><span class="gt">${esc(date)} ${esc(time)}</span></div>`;
-            h+=`<div class="game-scroll"><table class="gtable"><thead><tr><th></th>`;
-            for(const bk of books){
-                const link=(ev.books||{})[bk]?.event_link;
-                const label=esc(BL[bk]||bk);
-                const linkHtml=link?` <a class="dlink" href="${esc(link)}" target="_blank" title="Open in ${esc(BL_FULL[bk]||bk)}">&#8599;</a>`:'';
-                h+=`<th class="mkt-group" colspan="3">${label}${linkHtml}</th>`;
-            }
-            h+=`</tr><tr><th>Team</th>`;
-            for(const bk of books){
-                h+=`<th class="mkt-group">ML</th><th>SPR</th><th>TOT</th>`;
-            }
-            h+=`</tr></thead><tbody>`;
 
-            // Row 1: Away / Over
+            // === BEST ODDS (left, always visible) ===
+            h+=`<div class="best-and-books">`;
+            h+=`<div class="best-col">`;
+            h+=`<table class="gtable"><thead><tr><th>Team</th><th>ML</th><th>Spread</th><th>Total</th></tr></thead><tbody>`;
+
+            // Away row
             h+=`<tr><td>${esc(away)}</td>`;
-            for(const bk of books){
-                const bd=(ev.books||{})[bk]||{};
-                // ML
-                const ml=bd.moneyline?.[away];
-                h+=`<td class="mkt-group"><span class="oc ${ml!=null?cls(ml):'na'}">${fmt(ml)}</span></td>`;
-                // Spread
-                const sp=bd.spread?.[away];
-                if(sp){
-                    h+=`<td><span class="oc ${cls(sp.price)}"><span class="pt">${sp.point>0?'+'+sp.point:sp.point}</span>${fmt(sp.price)}</span></td>`;
-                }else{h+=`<td><span class="oc na">--</span></td>`}
-                // Total - Over
-                const tot=bd.total?.['Over'];
-                if(tot){
-                    h+=`<td><span class="oc ${cls(tot.price)}"><span class="pt">O ${tot.point}</span>${fmt(tot.price)}</span></td>`;
-                }else{h+=`<td><span class="oc na">--</span></td>`}
-            }
+            h+=bestCell(best.ml_away);
+            h+=bestCellPt(best.spr_away);
+            h+=bestCellPt(best.tot_over, 'O');
             h+=`</tr>`;
 
-            // Row 2: Home / Under
+            // Home row
             h+=`<tr><td>${esc(home)}</td>`;
-            for(const bk of books){
-                const bd=(ev.books||{})[bk]||{};
-                const ml=bd.moneyline?.[home];
-                h+=`<td class="mkt-group"><span class="oc ${ml!=null?cls(ml):'na'}">${fmt(ml)}</span></td>`;
-                const sp=bd.spread?.[home];
-                if(sp){
-                    h+=`<td><span class="oc ${cls(sp.price)}"><span class="pt">${sp.point>0?'+'+sp.point:sp.point}</span>${fmt(sp.price)}</span></td>`;
-                }else{h+=`<td><span class="oc na">--</span></td>`}
-                const tot=bd.total?.['Under'];
-                if(tot){
-                    h+=`<td><span class="oc ${cls(tot.price)}"><span class="pt">U ${tot.point}</span>${fmt(tot.price)}</span></td>`;
-                }else{h+=`<td><span class="oc na">--</span></td>`}
-            }
-            h+=`</tr></tbody></table></div>`;
+            h+=bestCell(best.ml_home);
+            h+=bestCellPt(best.spr_home);
+            h+=bestCellPt(best.tot_under, 'U');
+            h+=`</tr></tbody></table>`;
 
-            // Splits (Circa + DraftKings)
+            // Splits
             const splits = ev.splits || {};
             const circa = splits.circa;
             const dk = splits.draftkings;
@@ -341,6 +395,52 @@
             }
 
             h+=`</div>`;
+
+            // === ALL BOOKS (scrollable right) ===
+            h+=`<div class="books-col"><div class="game-scroll"><table class="gtable"><thead><tr>`;
+            for(const bk of books){
+                const link=(ev.books||{})[bk]?.event_link;
+                const label=esc(BL[bk]||bk);
+                const linkHtml=link?` <a class="dlink" href="${esc(link)}" target="_blank">&#8599;</a>`:'';
+                h+=`<th class="mkt-group" colspan="3">${label}${linkHtml}</th>`;
+            }
+            h+=`</tr><tr>`;
+            for(const bk of books){
+                h+=`<th class="mkt-group">ML</th><th>SPR</th><th>TOT</th>`;
+            }
+            h+=`</tr></thead><tbody>`;
+
+            // Away row
+            h+=`<tr>`;
+            for(const bk of books){
+                const bd=(ev.books||{})[bk]||{};
+                const ml=bd.moneyline?.[away];
+                h+=`<td class="mkt-group"><span class="oc ${ml!=null?cls(ml):'na'}">${fmt(ml)}</span></td>`;
+                const sp=bd.spread?.[away];
+                if(sp){h+=`<td><span class="oc ${cls(sp.price)}"><span class="pt">${sp.point>0?'+'+sp.point:sp.point}</span>${fmt(sp.price)}</span></td>`}
+                else{h+=`<td><span class="oc na">--</span></td>`}
+                const tot=bd.total?.['Over'];
+                if(tot){h+=`<td><span class="oc ${cls(tot.price)}"><span class="pt">O ${tot.point}</span>${fmt(tot.price)}</span></td>`}
+                else{h+=`<td><span class="oc na">--</span></td>`}
+            }
+            h+=`</tr>`;
+
+            // Home row
+            h+=`<tr>`;
+            for(const bk of books){
+                const bd=(ev.books||{})[bk]||{};
+                const ml=bd.moneyline?.[home];
+                h+=`<td class="mkt-group"><span class="oc ${ml!=null?cls(ml):'na'}">${fmt(ml)}</span></td>`;
+                const sp=bd.spread?.[home];
+                if(sp){h+=`<td><span class="oc ${cls(sp.price)}"><span class="pt">${sp.point>0?'+'+sp.point:sp.point}</span>${fmt(sp.price)}</span></td>`}
+                else{h+=`<td><span class="oc na">--</span></td>`}
+                const tot=bd.total?.['Under'];
+                if(tot){h+=`<td><span class="oc ${cls(tot.price)}"><span class="pt">U ${tot.point}</span>${fmt(tot.price)}</span></td>`}
+                else{h+=`<td><span class="oc na">--</span></td>`}
+            }
+            h+=`</tr></tbody></table></div></div>`;
+
+            h+=`</div></div>`;
         }
         board.innerHTML=h;
     }
