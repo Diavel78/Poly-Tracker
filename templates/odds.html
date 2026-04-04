@@ -727,7 +727,7 @@
             const mv = computeMovement(ev, currentOpeners) || {};
             const splits = ev.splits || {};
             const circa = splits.circa;
-            const dk = splits.draftkings;
+            const dk = splits.dk || splits.draftkings;
             const rlmSide = detectRLM(mv, splits, away, home);
             const hasMv = Object.keys(mv.ml||{}).length || Object.keys(mv.spread||{}).length;
 

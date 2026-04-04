@@ -818,15 +818,20 @@ def _normalize_splits(raw_splits):
 
 def _merge_splits(events, splits_map, splits_by_teams=None):
     """Attach splits data to each event, matching by ID or team names."""
+    if splits_by_teams is None:
+        splits_by_teams = {}
     for ev in events:
-        nid = ev.get("numeric_id", "")
-        eid = ev.get("id", "")
+        nid = str(ev.get("numeric_id", ""))
+        eid = str(ev.get("id", ""))
         found = splits_map.get(nid) or splits_map.get(eid)
         # Fallback: match by team names
-        if not found and splits_by_teams:
-            teams_key = frozenset([ev.get("away_team", "").lower(), ev.get("home_team", "").lower()])
-            found = splits_by_teams.get(teams_key)
-        ev["splits"] = found or {}
+        if not found:
+            away = ev.get("away_team", "").lower().strip()
+            home = ev.get("home_team", "").lower().strip()
+            if away and home:
+                teams_key = frozenset([away, home])
+                found = splits_by_teams.get(teams_key)
+        ev["splits"] = found if found else {}
     return events
 
 
