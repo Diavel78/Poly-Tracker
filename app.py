@@ -12,6 +12,8 @@ import secrets
 import functools
 from datetime import datetime, timezone, timedelta
 
+import requests as http_requests
+
 from dotenv import load_dotenv
 from flask import (
     Flask, render_template, request, redirect, url_for,
@@ -25,6 +27,7 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 POLYMARKET_KEY_ID = os.getenv("POLYMARKET_KEY_ID", "")
 POLYMARKET_SECRET_KEY = os.getenv("POLYMARKET_SECRET_KEY", "")
+OWLS_INSIGHT_API_KEY = os.getenv("OWLS_INSIGHT_API_KEY", "")
 DASHBOARD_USER = os.getenv("DASHBOARD_USER", "")
 DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "")
 
@@ -538,102 +541,160 @@ def dashboard():
     return render_template("dashboard.html")
 
 
+# ---------------------------------------------------------------------------
+# Owls Insight API helpers
+# ---------------------------------------------------------------------------
+
+OWLS_BASE = "https://api.owlsinsight.com/api/v1"
+OWLS_DEFAULT_BOOKS = ["fanduel", "draftkings", "betmgm", "pinnacle", "caesars"]
+OWLS_SPORTS = ["mlb", "nba", "nhl", "nfl", "ncaab", "ncaaf", "mma", "soccer", "tennis"]
+
+
+def _owls_get(path, params=None):
+    """Make an authenticated GET to Owls Insight API."""
+    headers = {"Authorization": f"Bearer {OWLS_INSIGHT_API_KEY}"}
+    resp = http_requests.get(f"{OWLS_BASE}{path}", headers=headers,
+                             params=params, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _normalize_owls_odds(sport, raw_data):
+    """Normalize Owls Insight response into a unified event list.
+
+    Raw response: { "data": { "pinnacle": [...events], "fanduel": [...] } }
+    Each event has markets with outcomes: { name, price (American), point }.
+    We merge across books into a single event list with per-book odds.
+    """
+    books_data = raw_data.get("data", raw_data)
+    if not isinstance(books_data, dict):
+        return []
+
+    # Build event index: merge same event across books
+    # Key by some event identifier (id, or home+away combo)
+    events_map = {}  # event_key -> event dict
+
+    for book, events in books_data.items():
+        if not isinstance(events, list):
+            continue
+        for ev in events:
+            # Try various key patterns the API might use
+            eid = ev.get("id") or ev.get("event_id") or ev.get("eventId", "")
+            home = ev.get("home_team") or ev.get("homeTeam") or ev.get("home", "")
+            away = ev.get("away_team") or ev.get("awayTeam") or ev.get("away", "")
+            event_key = str(eid) if eid else f"{away}@{home}"
+
+            if event_key not in events_map:
+                commence = (ev.get("commence_time") or ev.get("commenceTime")
+                            or ev.get("start_time") or ev.get("startTime") or "")
+                events_map[event_key] = {
+                    "id": eid,
+                    "sport": sport,
+                    "home_team": home,
+                    "away_team": away,
+                    "commence_time": commence,
+                    "league": ev.get("league", ""),
+                    "books": {},
+                }
+
+            # Extract markets for this book
+            book_odds = {
+                "moneyline": {}, "spread": {}, "total": {},
+                "event_link": ev.get("event_link", ""),
+                "event_ticker": ev.get("event_ticker", ""),
+            }
+
+            # Markets might be nested or flat — handle both patterns
+            markets = ev.get("markets", ev.get("bookmakers", [ev]))
+            if isinstance(markets, dict):
+                markets = [markets]
+            elif not isinstance(markets, list):
+                markets = [ev]
+
+            for mkt in markets:
+                # Moneyline
+                for key in ("moneyline", "h2h", "head_to_head"):
+                    ml = mkt.get(key)
+                    if ml and isinstance(ml, dict):
+                        for outcome in ml.get("outcomes", []):
+                            name = outcome.get("name", "")
+                            book_odds["moneyline"][name] = outcome.get("price")
+
+                # Spread
+                for key in ("spread", "spreads", "point_spread"):
+                    sp = mkt.get(key)
+                    if sp and isinstance(sp, dict):
+                        for outcome in sp.get("outcomes", []):
+                            name = outcome.get("name", "")
+                            book_odds["spread"][name] = {
+                                "price": outcome.get("price"),
+                                "point": outcome.get("point"),
+                            }
+
+                # Total
+                for key in ("total", "totals", "over_under"):
+                    tot = mkt.get(key)
+                    if tot and isinstance(tot, dict):
+                        for outcome in tot.get("outcomes", []):
+                            name = outcome.get("name", "")
+                            book_odds["total"][name] = {
+                                "price": outcome.get("price"),
+                                "point": outcome.get("point"),
+                            }
+
+            events_map[event_key]["books"][book] = book_odds
+
+    return sorted(events_map.values(), key=lambda e: e.get("commence_time", ""))
+
+
 @app.route("/api/odds")
 @login_required
 def api_odds():
-    """Fetch today's events with odds for the odds board."""
-    try:
-        client = get_client()
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    """Fetch odds from Owls Insight for requested sports."""
+    if not OWLS_INSIGHT_API_KEY:
+        return jsonify({"ok": False, "error": "OWLS_INSIGHT_API_KEY not configured"}), 500
+
+    sport = request.args.get("sport", "mlb")
+    books = request.args.get("books", ",".join(OWLS_DEFAULT_BOOKS))
 
     errors = []
     events = []
 
-    # Fetch today's active events
     try:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        resp = client.events.list({
-            "active": True,
-            "closed": False,
-            "startDateMin": today,
-            "startDateMax": today,
-            "limit": 100,
-        })
-        raw_events = resp.get("events", [])
+        raw = _owls_get(f"/{sport}/odds", {"books": books})
+        events = _normalize_owls_odds(sport, raw)
+    except http_requests.HTTPError as e:
+        errors.append(f"{sport}: HTTP {e.response.status_code}")
     except Exception as e:
-        errors.append(f"events: {e}")
-        raw_events = []
+        errors.append(f"{sport}: {e}")
 
-    # If no events today, try upcoming
-    if not raw_events:
-        try:
-            resp = client.events.list({
-                "active": True,
-                "closed": False,
-                "limit": 50,
-            })
-            raw_events = resp.get("events", [])
-        except Exception as e:
-            errors.append(f"events fallback: {e}")
-
-    # Enrich each event with BBO prices for its markets
-    for ev in raw_events:
-        markets = ev.get("markets", [])
-        if not markets:
-            continue
-
-        enriched_markets = []
-        for mkt in markets:
-            slug = mkt.get("slug", "")
-            team_info = mkt.get("team") or {}
-            team_name = team_info.get("name", "") if isinstance(team_info, dict) else ""
-            team_abbr = team_info.get("abbreviation", "") if isinstance(team_info, dict) else ""
-            team_logo = team_info.get("logo", "") if isinstance(team_info, dict) else ""
-            outcome = mkt.get("outcome", "")
-
-            # Fetch BBO for live odds
-            best_bid = None
-            best_ask = None
-            last_price = None
-            try:
-                bbo = client.markets.bbo(slug)
-                best_bid = _safe_float(bbo.get("bestBid"))
-                best_ask = _safe_float(bbo.get("bestAsk"))
-                last_price = _safe_float(bbo.get("lastTradePx"))
-            except Exception:
-                pass
-
-            mid_price = None
-            if best_bid is not None and best_ask is not None:
-                mid_price = (best_bid + best_ask) / 2
-            elif last_price is not None:
-                mid_price = last_price
-
-            enriched_markets.append({
-                "slug": slug,
-                "outcome": outcome,
-                "team_name": team_name,
-                "team_abbr": team_abbr,
-                "team_logo": team_logo,
-                "best_bid": best_bid,
-                "best_ask": best_ask,
-                "last_price": last_price,
-                "mid_price": mid_price,
-            })
-
-        events.append({
-            "slug": ev.get("slug", ""),
-            "title": ev.get("title", ""),
-            "start_time": ev.get("startTime", ""),
-            "markets": enriched_markets,
-        })
+    # Determine which books actually have data
+    active_books = set()
+    for ev in events:
+        active_books.update(ev.get("books", {}).keys())
 
     return jsonify({
         "ok": True,
+        "sport": sport,
         "events": events,
+        "books": sorted(active_books),
         "errors": errors,
     })
+
+
+@app.route("/api/odds/raw")
+@login_required
+def api_odds_raw():
+    """Debug: raw Owls Insight response."""
+    if not OWLS_INSIGHT_API_KEY:
+        return jsonify({"error": "no key"}), 500
+    sport = request.args.get("sport", "mlb")
+    books = request.args.get("books", "pinnacle,fanduel")
+    try:
+        raw = _owls_get(f"/{sport}/odds", {"books": books})
+        return jsonify(raw)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/raw")
