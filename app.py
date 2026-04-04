@@ -389,26 +389,16 @@ def parse_activities(client, activities):
         if act_type == "ACTIVITY_TYPE_TRADE":
             price = _safe_float(detail.get("price"))
             quantity = _safe_float(detail.get("qty"))
+            # Don't trust SDK's realizedPnl — it uses complement pricing
+            # and produces wrong results. P&L computed in post-processing.
+            pnl = None
 
-            # Try multiple methods to compute sell P&L
-            sdk_rpnl = _safe_float(detail.get("realizedPnl"))
-            pnl = sdk_rpnl
-
-            # Method 2: beforePosition/afterPosition realized diff
+            # Detect sell: position qty decreased
             t_before = detail.get("beforePosition") or {}
             t_after = detail.get("afterPosition") or {}
-            if pnl is None:
-                br = _safe_float(t_before.get("realized"))
-                ar = _safe_float(t_after.get("realized"))
-                if br is not None and ar is not None:
-                    diff = ar - br
-                    if abs(diff) > 0.001:
-                        pnl = diff
-
-            # Detect sell: P&L found, or position qty decreased
             bq = abs(_safe_float(t_before.get("netPosition")) or 0)
             aq = abs(_safe_float(t_after.get("netPosition")) or 0)
-            is_close = pnl is not None or bq > aq
+            is_close = bq > aq
 
             # Resolve market name from slug
             if market_slug:
@@ -492,7 +482,7 @@ def parse_activities(client, activities):
             # Sell/close: SDK price is the complement (NO side) for YES sells.
             # Actual proceeds per share = 1 - price.
             # e.g., SDK price=0.38 means you sold YES at $0.62, proceeds = 0.62 * qty
-            if act["pnl"] is None and pos["qty"] > 0:
+            if pos["qty"] > 0:
                 avg_cost = pos["total_cost"] / pos["qty"]
                 sell_proceeds_per_share = 1.0 - act["price"]
                 act["pnl"] = round((sell_proceeds_per_share - avg_cost) * act["quantity"], 2)
