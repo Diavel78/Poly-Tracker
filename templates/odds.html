@@ -35,11 +35,29 @@
         .search-box{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 12px;color:#c9d1d9;font-size:13px;width:220px;outline:none}
         .search-box:focus{border-color:#1f6feb}
         .search-box::placeholder{color:#484f58}
-        .book-pills{display:flex;gap:4px;flex-wrap:wrap;flex:1}
-        .bpill{padding:4px 10px;font-size:11px;font-weight:600;border-radius:14px;cursor:pointer;border:1px solid #30363d;background:#21262d;color:#8b949e;transition:all .15s;white-space:nowrap}
-        .bpill:hover{color:#c9d1d9;border-color:#8b949e}
-        .bpill.on{background:#1f6feb;color:#fff;border-color:#1f6feb}
         .info{font-size:11px;color:#484f58;margin-left:auto;white-space:nowrap}
+
+        /* Books button + dropdown */
+        .books-btn-wrap{position:relative}
+        .books-btn{padding:6px 14px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px}
+        .books-btn:hover{background:#30363d}
+        .books-btn .cnt{background:#1f6feb;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px}
+        .books-panel{display:none;position:absolute;top:100%;left:0;margin-top:6px;background:#161b22;border:1px solid #30363d;border-radius:8px;width:260px;max-height:420px;overflow-y:auto;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+        .books-panel.open{display:block}
+        .books-panel-header{padding:10px 12px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;align-items:center}
+        .books-panel-header span{font-size:12px;font-weight:700;color:#e6edf3}
+        .books-panel-header button{font-size:10px;color:#58a6ff;background:none;border:none;cursor:pointer}
+        .book-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #21262d;cursor:grab;user-select:none;transition:background .1s}
+        .book-item:hover{background:#1c2128}
+        .book-item:last-child{border-bottom:none}
+        .book-item.dragging{opacity:.4;background:#0d1117}
+        .book-item input[type=checkbox]{accent-color:#1f6feb;width:16px;height:16px;cursor:pointer}
+        .book-item .book-label{flex:1;font-size:13px;color:#c9d1d9}
+        .book-item .book-abbr{font-size:10px;color:#484f58;margin-left:4px}
+        .book-item .drag-handle{color:#484f58;font-size:14px;cursor:grab;padding:0 4px}
+        .book-item .drag-handle:hover{color:#8b949e}
+        .active-books-summary{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+        .abs-chip{font-size:10px;font-weight:600;color:#8b949e;background:#21262d;padding:2px 6px;border-radius:4px}
 
         /* Board */
         .board{max-width:1400px;margin:0 auto;padding:8px 20px 40px}
@@ -153,7 +171,20 @@
 
     <div class="toolbar">
         <input class="search-box" id="search" type="text" placeholder="Search team or matchup..." oninput="renderBoard()">
-        <div class="book-pills" id="book-pills"></div>
+        <div class="books-btn-wrap">
+            <button class="books-btn" onclick="toggleBooksPanel()">
+                Books <span class="cnt" id="books-cnt">0</span> &#9662;
+            </button>
+            <div class="books-panel" id="books-panel">
+                <div class="books-panel-header">
+                    <span>Sportsbooks</span>
+                    <button onclick="selectAllBooks()">All</button>
+                    <button onclick="selectNoBooks()">None</button>
+                </div>
+                <div id="books-list"></div>
+            </div>
+        </div>
+        <div class="active-books-summary" id="books-summary"></div>
         <span class="info" id="info"></span>
     </div>
 
@@ -202,27 +233,100 @@
         $('sport-bar').innerHTML=h;
     }
 
+    // Book order: user-defined order, persisted
+    let bookOrder = JSON.parse(localStorage.getItem('odds_book_order') || 'null') || [];
+
+    function saveBookPrefs(){
+        localStorage.setItem('odds_books', JSON.stringify([...enabledBooks]));
+        localStorage.setItem('odds_book_order', JSON.stringify(bookOrder));
+    }
+
+    function getOrderedBooks(){
+        const available = oddsData.books||[];
+        // Merge: user order first (if still available), then any new books at end
+        const ordered = [];
+        for(const b of bookOrder) { if(available.includes(b)) ordered.push(b); }
+        for(const b of available) { if(!ordered.includes(b)) ordered.push(b); }
+        bookOrder = ordered;
+        return ordered;
+    }
+
+    function getBooks(){
+        return getOrderedBooks().filter(b=>enabledBooks.has(b));
+    }
+
     function renderBookPills(){
-        const books = oddsData.books||[];
+        const ordered = getOrderedBooks();
+        const enabled = getBooks();
+        $('books-cnt').textContent = enabled.length;
+
+        // Summary chips
+        let sh='';
+        for(const b of enabled) sh+=`<span class="abs-chip">${esc(BL[b]||b)}</span>`;
+        $('books-summary').innerHTML=sh;
+
+        // Panel list with drag handles
         let h='';
-        for(const b of books){
+        for(let i=0;i<ordered.length;i++){
+            const b = ordered[i];
             const on = enabledBooks.has(b);
-            h+=`<span class="bpill ${on?'on':''}" onclick="toggleBook('${b}')" title="${esc(BL_FULL[b]||b)}">${esc(BL[b]||b)}</span>`;
+            const full = BL_FULL[b]||b;
+            const abbr = BL[b]||b;
+            h+=`<div class="book-item" draggable="true" data-book="${b}" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dropBook(event)" ondragend="dragEnd(event)">`;
+            h+=`<span class="drag-handle">&#9776;</span>`;
+            h+=`<input type="checkbox" ${on?'checked':''} onchange="toggleBook('${b}')">`;
+            h+=`<span class="book-label">${esc(full)}<span class="book-abbr">${esc(abbr)}</span></span>`;
+            h+=`</div>`;
         }
-        $('book-pills').innerHTML=h;
+        $('books-list').innerHTML=h;
     }
 
     function toggleBook(b){
         if(enabledBooks.has(b)) enabledBooks.delete(b); else enabledBooks.add(b);
-        localStorage.setItem('odds_books', JSON.stringify([...enabledBooks]));
+        saveBookPrefs();
         renderBookPills();
         renderBoard();
     }
 
-    function getBooks(){
-        const all = oddsData.books||[];
-        return all.filter(b=>enabledBooks.has(b));
+    function selectAllBooks(){
+        enabledBooks = new Set(getOrderedBooks());
+        saveBookPrefs(); renderBookPills(); renderBoard();
     }
+    function selectNoBooks(){
+        enabledBooks = new Set();
+        saveBookPrefs(); renderBookPills(); renderBoard();
+    }
+
+    let dragItem = null;
+    function dragStart(e){ dragItem = e.target.closest('.book-item'); dragItem.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; }
+    function dragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; }
+    function dropBook(e){
+        e.preventDefault();
+        const target = e.target.closest('.book-item');
+        if(!target || !dragItem || target===dragItem) return;
+        const fromBook = dragItem.dataset.book;
+        const toBook = target.dataset.book;
+        const fi = bookOrder.indexOf(fromBook);
+        const ti = bookOrder.indexOf(toBook);
+        if(fi<0||ti<0) return;
+        bookOrder.splice(fi,1);
+        bookOrder.splice(ti,0,fromBook);
+        saveBookPrefs(); renderBookPills(); renderBoard();
+    }
+    function dragEnd(e){ if(dragItem) dragItem.classList.remove('dragging'); dragItem=null; }
+
+    let booksPanelOpen = false;
+    function toggleBooksPanel(){
+        booksPanelOpen = !booksPanelOpen;
+        $('books-panel').classList.toggle('open', booksPanelOpen);
+    }
+    // Close panel when clicking outside
+    document.addEventListener('click', e=>{
+        if(booksPanelOpen && !e.target.closest('.books-btn-wrap')){
+            booksPanelOpen=false;
+            $('books-panel').classList.remove('open');
+        }
+    });
 
     function renderSplitsRow(circa, dk, label, mktKey, awayName, homeName) {
         // Prefer Circa, fall back to DK
