@@ -222,7 +222,10 @@
             const books = oddsData.books || [];
 
             if (!events.length) {
-                board.innerHTML = '<div class="empty-state">No games found for ' + (SPORT_LABELS[activeSport] || activeSport.toUpperCase()) + '</div>';
+                const msg = oddsData.meta_message
+                    ? esc(oddsData.meta_message)
+                    : 'No games found for ' + (SPORT_LABELS[activeSport] || activeSport.toUpperCase());
+                board.innerHTML = '<div class="empty-state">' + msg + '</div>';
                 $('event-count') && ($('event-count').textContent = '');
                 return;
             }

@@ -660,9 +660,14 @@ def api_odds():
     events = []
 
     from_cache = False
+    meta_message = ""
     try:
         raw, from_cache = _owls_get_cached(sport, books)
         events = _normalize_owls_odds(sport, raw)
+        # Capture meta message for empty sports (e.g., MMA with no active card)
+        meta = raw.get("meta", {})
+        if meta.get("message"):
+            meta_message = meta["message"]
     except http_requests.HTTPError as e:
         errors.append(f"{sport}: HTTP {e.response.status_code}")
     except Exception as e:
@@ -679,6 +684,7 @@ def api_odds():
         "sport": sport,
         "events": events,
         "books": sorted(active_books),
+        "meta_message": meta_message,
         "errors": errors,
     })
 
