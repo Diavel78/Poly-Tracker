@@ -528,8 +528,112 @@ def logout():
 
 @app.route("/")
 @login_required
+def odds_page():
+    return render_template("odds.html")
+
+
+@app.route("/dashboard")
+@login_required
 def dashboard():
     return render_template("dashboard.html")
+
+
+@app.route("/api/odds")
+@login_required
+def api_odds():
+    """Fetch today's events with odds for the odds board."""
+    try:
+        client = get_client()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    errors = []
+    events = []
+
+    # Fetch today's active events
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        resp = client.events.list({
+            "active": True,
+            "closed": False,
+            "startDateMin": today,
+            "startDateMax": today,
+            "limit": 100,
+        })
+        raw_events = resp.get("events", [])
+    except Exception as e:
+        errors.append(f"events: {e}")
+        raw_events = []
+
+    # If no events today, try upcoming
+    if not raw_events:
+        try:
+            resp = client.events.list({
+                "active": True,
+                "closed": False,
+                "limit": 50,
+            })
+            raw_events = resp.get("events", [])
+        except Exception as e:
+            errors.append(f"events fallback: {e}")
+
+    # Enrich each event with BBO prices for its markets
+    for ev in raw_events:
+        markets = ev.get("markets", [])
+        if not markets:
+            continue
+
+        enriched_markets = []
+        for mkt in markets:
+            slug = mkt.get("slug", "")
+            team_info = mkt.get("team") or {}
+            team_name = team_info.get("name", "") if isinstance(team_info, dict) else ""
+            team_abbr = team_info.get("abbreviation", "") if isinstance(team_info, dict) else ""
+            team_logo = team_info.get("logo", "") if isinstance(team_info, dict) else ""
+            outcome = mkt.get("outcome", "")
+
+            # Fetch BBO for live odds
+            best_bid = None
+            best_ask = None
+            last_price = None
+            try:
+                bbo = client.markets.bbo(slug)
+                best_bid = _safe_float(bbo.get("bestBid"))
+                best_ask = _safe_float(bbo.get("bestAsk"))
+                last_price = _safe_float(bbo.get("lastTradePx"))
+            except Exception:
+                pass
+
+            mid_price = None
+            if best_bid is not None and best_ask is not None:
+                mid_price = (best_bid + best_ask) / 2
+            elif last_price is not None:
+                mid_price = last_price
+
+            enriched_markets.append({
+                "slug": slug,
+                "outcome": outcome,
+                "team_name": team_name,
+                "team_abbr": team_abbr,
+                "team_logo": team_logo,
+                "best_bid": best_bid,
+                "best_ask": best_ask,
+                "last_price": last_price,
+                "mid_price": mid_price,
+            })
+
+        events.append({
+            "slug": ev.get("slug", ""),
+            "title": ev.get("title", ""),
+            "start_time": ev.get("startTime", ""),
+            "markets": enriched_markets,
+        })
+
+    return jsonify({
+        "ok": True,
+        "events": events,
+        "errors": errors,
+    })
 
 
 @app.route("/api/raw")

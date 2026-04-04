@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poly-Tracker — Odds</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+        }
+
+        /* --- Navbar --- */
+        .navbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 24px;
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+        }
+        .navbar h1 { font-size: 18px; color: #e6edf3; }
+        .navbar h1 a { color: #e6edf3; text-decoration: none; }
+        .navbar-right { display: flex; align-items: center; gap: 12px; }
+        .btn-sm {
+            padding: 6px 14px;
+            background: #21262d;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .btn-sm:hover { background: #30363d; }
+        .btn-active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+        .btn-refresh { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+        .btn-refresh:hover { background: #388bfd; }
+        .status { font-size: 12px; color: #8b949e; }
+        .status.loading { color: #d29922; }
+        .status.error { color: #f85149; }
+
+        /* --- Sport filter pills --- */
+        .filters {
+            display: flex;
+            gap: 8px;
+            padding: 16px 24px 0;
+            max-width: 1200px;
+            margin: 0 auto;
+            flex-wrap: wrap;
+        }
+        .pill {
+            padding: 6px 16px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 20px;
+            font-size: 13px;
+            color: #8b949e;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .pill:hover { color: #c9d1d9; border-color: #8b949e; }
+        .pill.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+
+        /* --- Layout --- */
+        .container { max-width: 1200px; margin: 0 auto; padding: 16px 24px 40px; }
+
+        /* --- Event card (game) --- */
+        .game {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        .game-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid #21262d;
+            font-size: 12px;
+            color: #8b949e;
+        }
+        .game-time { font-weight: 500; }
+        .game-body { padding: 0; }
+
+        /* --- Matchup row --- */
+        .matchup {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 16px;
+        }
+        .teams { padding: 0 16px; }
+        .team-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 0;
+        }
+        .team-row + .team-row {
+            border-top: 1px solid #21262d;
+        }
+        .team-logo {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: #21262d;
+            object-fit: contain;
+        }
+        .team-logo-placeholder {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: #21262d;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: #8b949e;
+        }
+        .team-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e6edf3;
+            flex: 1;
+        }
+
+        /* --- Odds cells --- */
+        .odds-grid {
+            display: flex;
+            gap: 0;
+        }
+        .odds-col {
+            display: flex;
+            flex-direction: column;
+            min-width: 90px;
+            border-left: 1px solid #21262d;
+        }
+        .odds-col-header {
+            text-align: center;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #8b949e;
+            padding: 8px 12px;
+            background: #0d1117;
+            border-bottom: 1px solid #21262d;
+        }
+        .odds-cell {
+            text-align: center;
+            padding: 10px 12px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.15s;
+            border-bottom: 1px solid #21262d;
+        }
+        .odds-cell:last-child { border-bottom: none; }
+        .odds-cell:hover {
+            background: #1c2128;
+        }
+        .odds-cell.fav { color: #f0883e; }
+        .odds-cell.dog { color: #58a6ff; }
+        .odds-cell.even { color: #c9d1d9; }
+        .odds-cell.na {
+            color: #484f58;
+            font-weight: 400;
+            font-size: 12px;
+            cursor: default;
+        }
+        .odds-cell .prob {
+            display: block;
+            font-size: 10px;
+            font-weight: 400;
+            color: #8b949e;
+            margin-top: 2px;
+        }
+
+        /* --- Empty / loading --- */
+        .empty-state {
+            text-align: center;
+            padding: 60px 24px;
+            color: #484f58;
+            font-size: 14px;
+        }
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #30363d;
+            border-top-color: #58a6ff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* --- Responsive --- */
+        @media (max-width: 768px) {
+            .navbar h1 { font-size: 16px; }
+            .container { padding: 12px 12px 40px; }
+            .odds-col { min-width: 70px; }
+            .odds-cell { font-size: 13px; padding: 8px 6px; }
+            .team-name { font-size: 13px; }
+            .filters { padding: 12px 12px 0; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1><a href="/">Poly-Tracker</a></h1>
+        <div class="navbar-right">
+            <span class="status" id="status">Loading...</span>
+            <a href="/" class="btn-sm btn-active">Odds</a>
+            <a href="/dashboard" class="btn-sm">Dashboard</a>
+            <button class="btn-sm btn-refresh" onclick="loadOdds()">Refresh</button>
+            <a href="/logout" class="btn-sm">Logout</a>
+        </div>
+    </nav>
+
+    <div class="filters" id="filters"></div>
+
+    <div class="container" id="board">
+        <div class="empty-state"><span class="spinner"></span> Loading odds...</div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        function probToAmerican(prob) {
+            if (prob === null || prob === undefined || prob <= 0 || prob >= 1) return '--';
+            if (prob >= 0.5) {
+                return Math.round(-prob / (1 - prob) * 100);
+            } else {
+                return '+' + Math.round((1 - prob) / prob * 100);
+            }
+        }
+
+        function oddsClass(prob) {
+            if (prob === null || prob === undefined) return 'na';
+            if (prob >= 0.55) return 'fav';
+            if (prob <= 0.45) return 'dog';
+            return 'even';
+        }
+
+        function localTime(isoStr) {
+            if (!isoStr) return '';
+            try {
+                const d = new Date(isoStr);
+                return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            } catch { return ''; }
+        }
+
+        function localDate(isoStr) {
+            if (!isoStr) return '';
+            try {
+                const d = new Date(isoStr);
+                return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            } catch { return ''; }
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        function extractSport(slug) {
+            // Slug format: aec-{sport}-{teams}-{date}
+            // e.g., aec-mlb-det-az-2026-03-30 → mlb
+            //        aec-nhl-cgy-veg-2026-04-02 → nhl
+            const m = slug.match(/^aec-([a-z]+)-/);
+            return m ? m[1].toUpperCase() : 'OTHER';
+        }
+
+        function stripDate(title) {
+            return title.replace(/\s+\d{4}-\d{2}-\d{2}$/, '');
+        }
+
+        let allEvents = [];
+        let activeFilter = 'ALL';
+
+        function renderFilters() {
+            const sports = new Set();
+            allEvents.forEach(ev => {
+                const sport = extractSport(ev.slug);
+                if (sport) sports.add(sport);
+            });
+
+            let html = `<span class="pill ${activeFilter === 'ALL' ? 'active' : ''}" onclick="setFilter('ALL')">All</span>`;
+            const sorted = [...sports].sort();
+            for (const s of sorted) {
+                const count = allEvents.filter(ev => extractSport(ev.slug) === s).length;
+                html += `<span class="pill ${activeFilter === s ? 'active' : ''}" onclick="setFilter('${s}')">${s} <span style="opacity:0.6">${count}</span></span>`;
+            }
+            $('filters').innerHTML = html;
+        }
+
+        function setFilter(sport) {
+            activeFilter = sport;
+            renderFilters();
+            renderBoard();
+        }
+
+        function renderBoard() {
+            const board = $('board');
+            let filtered = allEvents;
+            if (activeFilter !== 'ALL') {
+                filtered = allEvents.filter(ev => extractSport(ev.slug) === activeFilter);
+            }
+
+            if (!filtered.length) {
+                board.innerHTML = '<div class="empty-state">No games found</div>';
+                return;
+            }
+
+            let html = '';
+            for (const ev of filtered) {
+                const markets = ev.markets || [];
+                if (markets.length < 1) continue;
+
+                const time = localTime(ev.start_time);
+                const date = localDate(ev.start_time);
+                const title = stripDate(ev.title);
+                const sport = extractSport(ev.slug);
+
+                html += `<div class="game">
+                    <div class="game-header">
+                        <span>${esc(sport)} &middot; ${esc(title)}</span>
+                        <span class="game-time">${esc(date)} ${esc(time)}</span>
+                    </div>
+                    <div class="game-body">
+                        <div class="matchup">
+                            <div class="teams">`;
+
+                // Render each market as a team row (typically 2 per event: home/away)
+                for (const mkt of markets) {
+                    const name = mkt.team_name || mkt.outcome || mkt.slug;
+                    const abbr = mkt.team_abbr || '';
+                    const logo = mkt.team_logo;
+
+                    html += `<div class="team-row">`;
+                    if (logo) {
+                        html += `<img class="team-logo" src="${esc(logo)}" alt="${esc(abbr)}" onerror="this.style.display='none'">`;
+                    } else {
+                        html += `<div class="team-logo-placeholder">${esc(abbr || name.substring(0, 3).toUpperCase())}</div>`;
+                    }
+                    html += `<span class="team-name">${esc(name)}</span>`;
+                    html += `</div>`;
+                }
+
+                html += `</div>
+                            <div class="odds-grid">
+                                <div class="odds-col">
+                                    <div class="odds-col-header">Moneyline</div>`;
+
+                for (const mkt of markets) {
+                    const prob = mkt.mid_price;
+                    const american = probToAmerican(prob);
+                    const cls = oddsClass(prob);
+                    const probPct = prob !== null ? (prob * 100).toFixed(0) + '%' : '';
+
+                    if (prob === null) {
+                        html += `<div class="odds-cell na">--</div>`;
+                    } else {
+                        html += `<div class="odds-cell ${cls}">${american}<span class="prob">${probPct}</span></div>`;
+                    }
+                }
+
+                html += `</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }
+
+            board.innerHTML = html;
+        }
+
+        async function loadOdds() {
+            const status = $('status');
+            status.textContent = 'Loading...';
+            status.className = 'status loading';
+
+            try {
+                const resp = await fetch('/api/odds');
+                const data = await resp.json();
+
+                if (!data.ok) {
+                    status.textContent = 'Error: ' + (data.error || 'Unknown');
+                    status.className = 'status error';
+                    return;
+                }
+
+                allEvents = data.events || [];
+                const now = new Date();
+                status.textContent = `${allEvents.length} games \u00b7 ${now.toLocaleTimeString()}`;
+                status.className = 'status';
+
+                renderFilters();
+                renderBoard();
+
+                if (data.errors && data.errors.length) {
+                    console.warn('API warnings:', data.errors);
+                }
+            } catch (err) {
+                status.textContent = 'Fetch error';
+                status.className = 'status error';
+                console.error(err);
+            }
+        }
+
+        loadOdds();
+        setInterval(loadOdds, 120000); // refresh every 2 min
+    </script>
+</body>
+</html>
