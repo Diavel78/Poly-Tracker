@@ -781,16 +781,15 @@ def _normalize_splits(raw_splits):
             "total": { "over_bets_pct", "over_handle_pct", "under_bets_pct", "under_handle_pct", "line" }
         } ] } ] }
     """
-    splits_map = {}
+    splits_map = {}  # event_id -> splits
+    splits_by_teams = {}  # frozenset(away,home) -> splits
     raw_data = raw_splits.get("data", [])
     if not isinstance(raw_data, list):
-        return {}
+        return {}, {}
 
     for ev in raw_data:
         eid = ev.get("event_id") or ev.get("eventId") or ev.get("id", "")
-        if not eid:
-            continue
-        eid = str(eid)
+        eid = str(eid) if eid else ""
 
         ev_splits = {}
         for sp in ev.get("splits", []):
@@ -805,17 +804,28 @@ def _normalize_splits(raw_splits):
             }
 
         if ev_splits:
-            splits_map[eid] = ev_splits
+            if eid:
+                splits_map[eid] = ev_splits
+            # Also index by team names for fallback matching
+            away = ev.get("away_team", "").lower()
+            home = ev.get("home_team", "").lower()
+            if away and home:
+                splits_by_teams[frozenset([away, home])] = ev_splits
 
-    return splits_map
+    return splits_map, splits_by_teams
 
 
-def _merge_splits(events, splits_map):
-    """Attach splits data to each event, matching by numeric_id or id."""
+def _merge_splits(events, splits_map, splits_by_teams=None):
+    """Attach splits data to each event, matching by ID or team names."""
     for ev in events:
         nid = ev.get("numeric_id", "")
         eid = ev.get("id", "")
-        ev["splits"] = splits_map.get(nid) or splits_map.get(eid, {})
+        found = splits_map.get(nid) or splits_map.get(eid)
+        # Fallback: match by team names
+        if not found and splits_by_teams:
+            teams_key = frozenset([ev.get("away_team", "").lower(), ev.get("home_team", "").lower()])
+            found = splits_by_teams.get(teams_key)
+        ev["splits"] = found or {}
     return events
 
 
@@ -926,8 +936,8 @@ def api_odds():
     # Fetch splits and merge (MVP plan)
     try:
         raw_splits, _ = _fetch_splits(sport)
-        splits_map = _normalize_splits(raw_splits)
-        events = _merge_splits(events, splits_map)
+        splits_map, splits_by_teams = _normalize_splits(raw_splits)
+        events = _merge_splits(events, splits_map, splits_by_teams)
     except Exception as e:
         errors.append(f"splits: {e}")
 
