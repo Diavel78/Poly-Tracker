@@ -456,32 +456,11 @@ def parse_activities(client, activities):
             "pnl": pnl,
         })
 
-    # Post-process: compute trade P&L from tracked average cost per slug.
-    slug_positions = {}
-    for i in range(len(parsed) - 1, -1, -1):
-        act = parsed[i]
-        if act["type"] != "Trade":
-            continue
-        slug = act["_market_slug"]
-        if not slug or act["price"] is None or not act["quantity"]:
-            continue
-
-        if slug not in slug_positions:
-            slug_positions[slug] = {"qty": 0.0, "total_cost": 0.0}
-        pos = slug_positions[slug]
-
-        if not act["_is_close"]:
-            pos["qty"] += act["quantity"]
-            pos["total_cost"] += act["price"] * act["quantity"]
-        else:
-            if pos["qty"] > 0:
-                avg_cost = pos["total_cost"] / pos["qty"]
-                computed_pnl = round((act["price"] - avg_cost) * act["quantity"], 2)
-                act["pnl"] = computed_pnl
-                pos["total_cost"] -= avg_cost * act["quantity"]
-                pos["qty"] -= act["quantity"]
-            # If we couldn't compute from tracked buys, keep SDK's realizedPnl
-            # (already set as act["pnl"] from earlier)
+    # Post-process: for trade sells, use SDK's realizedPnl directly.
+    # The SDK's price field can represent the complementary side of the market,
+    # so computing P&L from buy/sell prices ourselves is unreliable.
+    # SDK's realizedPnl is already set as act["pnl"] from the parsing step above.
+    # No further computation needed.
 
     # Strip internal fields before returning
     for act in parsed:
