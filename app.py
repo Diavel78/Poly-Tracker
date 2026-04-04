@@ -746,8 +746,11 @@ def api_odds():
         errors.append(f"splits: {e}")
 
     active_books = set()
+    leagues = set()
     for ev in events:
         active_books.update(ev.get("books", {}).keys())
+        if ev.get("league"):
+            leagues.add(ev["league"])
 
     return jsonify({
         "ok": True,
@@ -755,6 +758,7 @@ def api_odds():
         "sport": sport,
         "events": events,
         "books": sorted(active_books),
+        "leagues": sorted(leagues),
         "meta_message": meta_message,
         "errors": errors,
     })

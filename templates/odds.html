@@ -46,6 +46,7 @@
 
         /* Game card — sportsbook style */
         .game{background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:10px;overflow:hidden}
+        .game-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
         .ghdr{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;font-size:11px;color:#8b949e;border-bottom:1px solid #21262d}
         .ghdr .gt{font-weight:600;color:#58a6ff}
 
@@ -71,8 +72,8 @@
         .dlink:hover{color:#58a6ff}
 
         /* Splits bar */
-        .splits{display:flex;gap:12px;padding:6px 14px;background:#0d1117;border-top:1px solid #21262d;flex-wrap:wrap;align-items:center}
-        .splits-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#484f58}
+        .splits{display:flex;gap:12px;padding:8px 14px;background:#0d1117;border-top:1px solid #f0883e33;flex-wrap:wrap;align-items:center}
+        .splits-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#f0883e;margin-right:4px}
         .split-item{display:flex;align-items:center;gap:6px;font-size:11px}
         .split-item .sname{color:#8b949e;font-weight:500}
         .split-bar{display:flex;height:6px;width:80px;border-radius:3px;overflow:hidden;background:#21262d}
@@ -139,10 +140,14 @@
     const DEFAULT_BOOKS = ['fanduel','draftkings','betmgm','pinnacle','caesars'];
     let enabledBooks = new Set(JSON.parse(localStorage.getItem('odds_books') || 'null') || DEFAULT_BOOKS);
 
-    // Map sport tab to expected league filter (only show major league games)
+    // Filter out minor/college games for major league tabs.
+    // Only strict-filter for sports where we KNOW the league name.
+    // NCAAB/NCAAF/MMA/soccer/tennis pass through unfiltered.
     const LEAGUE_FILTER = {
-        mlb: 'MLB', nba: 'NBA', nhl: 'NHL', nfl: 'NFL',
-        ncaab: 'NCAAB', ncaaf: 'NCAAF'
+        mlb: ['MLB'],
+        nba: ['NBA'],
+        nhl: ['NHL'],
+        nfl: ['NFL'],
     };
 
     function esc(s){if(!s)return '';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
@@ -246,7 +251,7 @@
         // Filter by league (e.g., only "MLB" games on MLB tab, not minor/college)
         const leagueFilter = LEAGUE_FILTER[activeSport];
         if (leagueFilter) {
-            events = events.filter(e => e.league === leagueFilter);
+            events = events.filter(e => leagueFilter.includes(e.league));
         }
 
         // Filter by search
@@ -273,7 +278,7 @@
             const league=ev.league?esc(ev.league)+' · ':'';
 
             h+=`<div class="game"><div class="ghdr"><span>${league}${esc(away)} @ ${esc(home)}</span><span class="gt">${esc(date)} ${esc(time)}</span></div>`;
-            h+=`<table class="gtable"><thead><tr><th></th>`;
+            h+=`<div class="game-scroll"><table class="gtable"><thead><tr><th></th>`;
             for(const bk of books){
                 const link=(ev.books||{})[bk]?.event_link;
                 const label=esc(BL[bk]||bk);
@@ -321,7 +326,7 @@
                     h+=`<td><span class="oc ${cls(tot.price)}"><span class="pt">U ${tot.point}</span>${fmt(tot.price)}</span></td>`;
                 }else{h+=`<td><span class="oc na">--</span></td>`}
             }
-            h+=`</tr></tbody></table>`;
+            h+=`</tr></tbody></table></div>`;
 
             // Splits (Circa + DraftKings)
             const splits = ev.splits || {};
