@@ -54,8 +54,9 @@
         .book-item input[type=checkbox]{accent-color:#1f6feb;width:16px;height:16px;cursor:pointer}
         .book-item .book-label{flex:1;font-size:13px;color:#c9d1d9}
         .book-item .book-abbr{font-size:10px;color:#484f58;margin-left:4px}
-        .book-item .drag-handle{color:#484f58;font-size:14px;cursor:grab;padding:0 4px}
-        .book-item .drag-handle:hover{color:#8b949e}
+        .book-item .move-btn{color:#484f58;font-size:16px;background:none;border:none;cursor:pointer;padding:0 3px;line-height:1}
+        .book-item .move-btn:hover{color:#58a6ff}
+        .book-item .move-btn:active{color:#1f6feb}
         .active-books-summary{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
         .abs-chip{font-size:10px;font-weight:600;color:#8b949e;background:#21262d;padding:2px 6px;border-radius:4px}
 
@@ -272,8 +273,9 @@
             const on = enabledBooks.has(b);
             const full = BL_FULL[b]||b;
             const abbr = BL[b]||b;
-            h+=`<div class="book-item" draggable="true" data-book="${b}" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dropBook(event)" ondragend="dragEnd(event)">`;
-            h+=`<span class="drag-handle">&#9776;</span>`;
+            h+=`<div class="book-item" data-book="${b}">`;
+            h+=`<button class="move-btn" onclick="moveBook('${b}',-1)" ${i===0?'disabled':''}>&#9650;</button>`;
+            h+=`<button class="move-btn" onclick="moveBook('${b}',1)" ${i===ordered.length-1?'disabled':''}>&#9660;</button>`;
             h+=`<input type="checkbox" ${on?'checked':''} onchange="toggleBook('${b}')">`;
             h+=`<span class="book-label">${esc(full)}<span class="book-abbr">${esc(abbr)}</span></span>`;
             h+=`</div>`;
@@ -297,23 +299,15 @@
         saveBookPrefs(); renderBookPills(); renderBoard();
     }
 
-    let dragItem = null;
-    function dragStart(e){ dragItem = e.target.closest('.book-item'); dragItem.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; }
-    function dragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; }
-    function dropBook(e){
-        e.preventDefault();
-        const target = e.target.closest('.book-item');
-        if(!target || !dragItem || target===dragItem) return;
-        const fromBook = dragItem.dataset.book;
-        const toBook = target.dataset.book;
-        const fi = bookOrder.indexOf(fromBook);
-        const ti = bookOrder.indexOf(toBook);
-        if(fi<0||ti<0) return;
-        bookOrder.splice(fi,1);
-        bookOrder.splice(ti,0,fromBook);
+    function moveBook(b, dir){
+        const i = bookOrder.indexOf(b);
+        if(i<0) return;
+        const ni = i+dir;
+        if(ni<0||ni>=bookOrder.length) return;
+        bookOrder.splice(i,1);
+        bookOrder.splice(ni,0,b);
         saveBookPrefs(); renderBookPills(); renderBoard();
     }
-    function dragEnd(e){ if(dragItem) dragItem.classList.remove('dragging'); dragItem=null; }
 
     let booksPanelOpen = false;
     function toggleBooksPanel(){
