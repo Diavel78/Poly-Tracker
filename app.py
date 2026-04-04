@@ -737,14 +737,13 @@ def api_odds():
     except Exception as e:
         errors.append(f"{sport}: {e}")
 
-    # Fetch splits and merge (requires Rookie+ plan)
-    # Disabled for now — Bench plan gets 403 on /splits
-    # try:
-    #     raw_splits, _ = _fetch_splits(sport)
-    #     splits_map = _normalize_splits(raw_splits)
-    #     events = _merge_splits(events, splits_map)
-    # except Exception as e:
-    #     errors.append(f"splits: {e}")
+    # Fetch splits and merge (MVP plan)
+    try:
+        raw_splits, _ = _fetch_splits(sport)
+        splits_map = _normalize_splits(raw_splits)
+        events = _merge_splits(events, splits_map)
+    except Exception as e:
+        errors.append(f"splits: {e}")
 
     active_books = set()
     leagues = set()
