@@ -1060,7 +1060,7 @@ def api_odds():
         "cached": from_cache,
         "sport": sport,
         "events": events,
-        "books": sorted(active_books),
+        "books": sorted(active_books, key=lambda b: (0 if b == "pinnacle" else 1, b)),
         "leagues": sorted(leagues),
         "meta_message": meta_message,
         "errors": errors,
