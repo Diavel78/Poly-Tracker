@@ -955,6 +955,17 @@ def api_my_bets():
             elif team_name:
                 pick = team_name
 
+            # Compute entry price and convert to American odds
+            cost = _safe_float(pos.get("cost"))
+            quantity = abs(net)
+            entry_price = (cost / quantity) if cost and quantity > 0 else None
+            entry_american = None
+            if entry_price and 0 < entry_price < 1:
+                if entry_price >= 0.5:
+                    entry_american = round(-entry_price / (1 - entry_price) * 100)
+                else:
+                    entry_american = round((1 - entry_price) / entry_price * 100)
+
             bets.append({
                 "slug": slug,
                 "event_slug": event_slug,
@@ -962,6 +973,7 @@ def api_my_bets():
                 "team_name": team_name,
                 "pick": pick,
                 "side": "YES" if net > 0 else "NO",
+                "entry_american": entry_american,
             })
     except Exception as e:
         return jsonify({"ok": False, "bets": [], "error": str(e)})

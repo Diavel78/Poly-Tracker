@@ -592,7 +592,10 @@
 
     function renderBetTag(bet) {
         const pick = bet.pick || bet.team_name || '?';
-        return `<span class="my-bet-tag"><span class="check">&#10003;</span>POLY: ${esc(pick)}</span>`;
+        const odds = bet.entry_american != null
+            ? ` (${bet.entry_american > 0 ? '+' : ''}${bet.entry_american})`
+            : '';
+        return `<span class="my-bet-tag"><span class="check">&#10003;</span>POLY: ${esc(pick)}${odds}</span>`;
     }
 
     let myBets = []; // Active Polymarket positions
