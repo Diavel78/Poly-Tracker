@@ -572,7 +572,10 @@ def _owls_get_cached(sport, books):
     if cached and (now - cached["ts"]) < OWLS_CACHE_TTL:
         return cached["data"], True  # data, from_cache
 
-    raw = _owls_get(f"/{sport}/odds", {"books": books})
+    params = {}
+    if books:
+        params["books"] = books
+    raw = _owls_get(f"/{sport}/odds", params)
     _owls_cache[cache_key] = {"data": raw, "ts": now}
     return raw, False
 
@@ -654,7 +657,8 @@ def api_odds():
         return jsonify({"ok": False, "error": "OWLS_INSIGHT_API_KEY not configured"}), 500
 
     sport = request.args.get("sport", "mlb")
-    books = request.args.get("books", ",".join(OWLS_DEFAULT_BOOKS))
+    # Fetch all books by default (no books param = all available)
+    books = request.args.get("books", "")
 
     errors = []
     events = []

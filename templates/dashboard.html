@@ -334,7 +334,13 @@
 </head>
 <body>
     <nav class="navbar">
-        <h1><a href="/" style="color:#e6edf3;text-decoration:none">Poly-Tracker</a></h1>
+        <div style="display:flex;align-items:center;gap:20px">
+            <h1><a href="/" style="color:#e6edf3;text-decoration:none">Poly-Tracker</a></h1>
+            <div style="display:flex;gap:4px">
+                <a href="/" style="padding:5px 12px;font-size:12px;font-weight:600;color:#8b949e;text-decoration:none;border-radius:6px">Odds</a>
+                <a href="/dashboard" style="padding:5px 12px;font-size:12px;font-weight:600;color:#fff;background:#1f6feb;text-decoration:none;border-radius:6px">Dashboard</a>
+            </div>
+        </div>
         <div class="navbar-right">
             <span class="status" id="status">Loading...</span>
             <button class="btn-sm btn-betslip" onclick="openBetSlip()">Bet Slip</button>
