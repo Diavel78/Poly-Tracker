@@ -962,7 +962,7 @@ def api_odds():
         "cached": from_cache,
         "sport": sport,
         "events": events,
-        "books": sorted(active_books, key=lambda b: (0 if b == "pinnacle" else 1, b)),
+        "books": sorted(active_books, key=lambda b: (0 if b == "circa" else 1 if b == "pinnacle" else 2, b)),
         "leagues": sorted(leagues),
         "meta_message": meta_message,
         "errors": errors,
