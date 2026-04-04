@@ -311,18 +311,26 @@
     }
 
     function detectRLM(mv, splits, away, home) {
+        // RLM = line moves to make the sharp side MORE expensive, not less.
+        // Normal: sharps on Oakland → Oakland gets cheaper (book adjusts)
+        // RLM: sharps on Oakland → Oakland gets MORE expensive (line moves against money)
         if (!mv?.ml || !splits?.circa?.moneyline) return null;
         const awayDiff = mv.ml[away]?.diff || 0;
+        const homeDiff = mv.ml[home]?.diff || 0;
         const circa = splits.circa.moneyline;
         const awayHandle = circa.away_handle_pct;
         const homeHandle = circa.home_handle_pct;
-        if (awayDiff === 0 || awayHandle == null || homeHandle == null) return null;
-        const lineFavorsAway = awayDiff > 0;
-        const moneyOnHome = homeHandle > 60;
+        if (Math.abs(awayDiff) < 3 || awayHandle == null || homeHandle == null) return null;
+
+        // Away price went DOWN (more negative = more expensive for away bettors)
+        // AND money is on away = RLM (line moving against the money)
+        const awayGotExpensive = awayDiff < 0;
+        const homeGotExpensive = homeDiff < 0;
         const moneyOnAway = awayHandle > 60;
-        if ((lineFavorsAway && moneyOnHome) || (!lineFavorsAway && moneyOnAway)) {
-            return lineFavorsAway && moneyOnHome ? home : away;
-        }
+        const moneyOnHome = homeHandle > 60;
+
+        if (awayGotExpensive && moneyOnAway) return away;  // sharp money on away but line making away pricier
+        if (homeGotExpensive && moneyOnHome) return home;   // sharp money on home but line making home pricier
         return null;
     }
 
