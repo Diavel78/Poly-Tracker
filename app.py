@@ -419,23 +419,19 @@ def parse_activities(client, activities):
             if cost is not None and quantity > 0:
                 price = cost / quantity
 
-            # Compute P&L: use difference in realized between before/after,
-            # or fall back to computing from position direction and cost
-            before_realized = _safe_float(before.get("realized")) or 0
-            after_realized = _safe_float(after.get("realized")) or 0
-            pnl_diff = after_realized - before_realized
-            if abs(pnl_diff) > 0.001:
-                pnl = pnl_diff
-            elif cost is not None:
+            # Compute P&L from win/loss logic:
+            # LONG = YES side won, SHORT = NO side won
+            # Positive netPosition = held YES, negative = held NO
+            if cost is not None:
                 net = _safe_float(before.get("netPosition")) or 0
                 held_yes = net > 0
                 yes_won = side in ("YES", "LONG")
                 no_won = side in ("NO", "SHORT")
                 won = (held_yes and yes_won) or (not held_yes and no_won)
                 if won:
-                    pnl = quantity - cost
+                    pnl = quantity - cost  # payout is $1 * qty minus what you paid
                 else:
-                    pnl = -cost
+                    pnl = -cost  # total loss
 
         elif act_type == "ACTIVITY_TYPE_ACCOUNT_BALANCE_CHANGE":
             amount = _safe_float(detail.get("amount"))
