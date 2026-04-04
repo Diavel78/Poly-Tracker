@@ -385,9 +385,6 @@
             <div class="tab" data-tab="closed" onclick="switchTab('closed')">
                 Closed Positions <span class="tab-count" id="closed-count">0</span>
             </div>
-            <div class="tab" data-tab="activity" onclick="switchTab('activity')">
-                All Activity <span class="tab-count" id="activity-count">0</span>
-            </div>
         </div>
 
         <!-- Open Positions tab -->
@@ -404,15 +401,6 @@
             <div class="section">
                 <div id="closed-body">
                     <div class="empty-state"><span class="spinner"></span> Loading...</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- All Activity tab -->
-        <div class="tab-panel" id="panel-activity">
-            <div class="section">
-                <div id="activities-body">
-                    <div class="empty-state"><span class="spinner"></span> Loading activity...</div>
                 </div>
             </div>
         </div>
@@ -549,17 +537,15 @@
             }
             let html = '<table><thead><tr>' +
                 '<th>Date</th><th>Market</th><th>Result</th>' +
-                '<th class="right">Qty</th><th class="right">Entry</th>' +
+                '<th class="right">Qty</th><th class="right">Cost</th>' +
                 '<th class="right">P&L</th></tr></thead><tbody>';
 
             for (const c of closed) {
                 let result = '';
-                if (c.type === 'Trade') {
-                    result = '<span style="color:#58a6ff">Sold</span>';
-                } else if (c.pnl !== null && c.pnl > 0) {
-                    result = '<span style="color:#3fb950">W</span>';
+                if (c.pnl !== null && c.pnl > 0) {
+                    result = '<span style="color:#3fb950;font-weight:700">W</span>';
                 } else if (c.pnl !== null && c.pnl < 0) {
-                    result = '<span style="color:#f85149">L</span>';
+                    result = '<span style="color:#f85149;font-weight:700">L</span>';
                 } else {
                     result = '<span style="color:#8b949e">Push</span>';
                 }
@@ -570,33 +556,6 @@
                     <td class="right">${c.quantity !== null ? c.quantity.toFixed(0) : '--'}</td>
                     <td class="right">${c.price !== null ? amt(c.price, '$') : '--'}</td>
                     <td class="right ${pnlClass(c.pnl)}">${pnlAmt(c.pnl)}</td>
-                </tr>`;
-            }
-            html += '</tbody></table>';
-            el.innerHTML = html;
-        }
-
-        function renderActivities(activities) {
-            const el = $('activities-body');
-            $('activity-count').textContent = activities.length;
-            if (!activities.length) {
-                el.innerHTML = '<div class="empty-state">No recent activity</div>';
-                return;
-            }
-            let html = '<table><thead><tr>' +
-                '<th>Time</th><th>Market</th>' +
-                '<th class="right">Qty</th><th class="right">Price</th>' +
-                '<th class="right">P&L</th>' +
-                '<th>Type</th></tr></thead><tbody>';
-
-            for (const a of activities) {
-                html += `<tr>
-                    <td>${localTime(a.timestamp)}</td>
-                    <td>${esc(a.market)}</td>
-                    <td class="right">${a.quantity !== null ? a.quantity.toFixed(0) : '--'}</td>
-                    <td class="right">${a.price !== null ? amt(a.price, '$') : '--'}</td>
-                    <td class="right ${pnlClass(a.pnl)}">${pnlAmt(a.pnl)}</td>
-                    <td>${esc(a.type)}</td>
                 </tr>`;
             }
             html += '</tbody></table>';
@@ -711,7 +670,6 @@
                 renderCards(data);
                 renderPositions(data.positions);
                 renderClosed(data.closed_positions || []);
-                renderActivities(data.activities);
 
                 const ts = new Date(data.timestamp);
                 if (data.errors && data.errors.length) {
