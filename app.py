@@ -391,12 +391,26 @@ def parse_activities(client, activities):
         if act_type == "ACTIVITY_TYPE_TRADE":
             price = _safe_float(detail.get("price"))
             quantity = _safe_float(detail.get("qty"))
-            # Detect sell/close: realizedPnl non-null, or explicit side/action
+
+            # Try multiple methods to compute sell P&L
             sdk_rpnl = _safe_float(detail.get("realizedPnl"))
-            trade_side = (detail.get("side") or detail.get("tradeType") or "").lower()
-            is_close = sdk_rpnl is not None or trade_side in ("sell", "close", "short")
-            # Use SDK's realizedPnl directly when available
-            pnl = sdk_rpnl  # will be overwritten by post-processing if tracking works
+            pnl = sdk_rpnl
+
+            # Method 2: beforePosition/afterPosition realized diff
+            t_before = detail.get("beforePosition") or {}
+            t_after = detail.get("afterPosition") or {}
+            if pnl is None:
+                br = _safe_float(t_before.get("realized"))
+                ar = _safe_float(t_after.get("realized"))
+                if br is not None and ar is not None:
+                    diff = ar - br
+                    if abs(diff) > 0.001:
+                        pnl = diff
+
+            # Detect sell: P&L found, or position qty decreased
+            bq = abs(_safe_float(t_before.get("netPosition")) or 0)
+            aq = abs(_safe_float(t_after.get("netPosition")) or 0)
+            is_close = pnl is not None or bq > aq
 
             # Resolve market name from slug
             if market_slug:
@@ -525,6 +539,36 @@ def api_raw():
             raw[name] = {"_error": str(e), "_type": type(e).__name__}
 
     return jsonify(raw)
+
+
+@app.route("/api/debug-trades")
+@login_required
+def api_debug_trades():
+    """Debug: show raw trade detail fields for recent sell activities."""
+    try:
+        client = get_client()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    try:
+        activities = client.portfolio.activities(params={"limit": 50})
+        acts = activities.get("activities", [])
+    except Exception as e:
+        return jsonify({"error": f"activities: {e}"}), 500
+
+    trades = []
+    for act in acts:
+        if act.get("type") != "ACTIVITY_TYPE_TRADE":
+            continue
+        detail = act.get("trade", {})
+        trades.append({
+            "all_detail_keys": list(detail.keys()) if isinstance(detail, dict) else str(type(detail)),
+            "detail": detail,
+        })
+        if len(trades) >= 10:
+            break
+
+    return jsonify({"trade_count": len(trades), "trades": trades})
 
 
 @app.route("/api/debug-markets")
