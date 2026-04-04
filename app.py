@@ -481,20 +481,14 @@ def parse_activities(client, activities):
             pos["qty"] += act["quantity"]
             pos["total_cost"] += act["price"] * act["quantity"]
         else:
-            # Sell/close: SDK price is the complement (NO side) for YES sells.
-            # Actual proceeds per share = 1 - price.
-            # e.g., SDK price=0.38 means you sold YES at $0.62, proceeds = 0.62 * qty
+            # Sell/close: P&L = (sell_price - avg_buy_price) * qty
             if pos["qty"] > 0:
                 avg_cost = pos["total_cost"] / pos["qty"]
-                sell_proceeds_per_share = 1.0 - act["price"]
-                act["pnl"] = round((sell_proceeds_per_share - avg_cost) * act["quantity"], 2)
-            # Show entry cost in the price field for display
-            if pos["qty"] > 0:
-                act["price"] = round(pos["total_cost"] / pos["qty"], 4)
-            # Reduce tracked position
-            sold_qty = min(act["quantity"], pos["qty"])
-            if pos["qty"] > 0:
-                avg_cost = pos["total_cost"] / pos["qty"]
+                act["pnl"] = round((act["price"] - avg_cost) * act["quantity"], 2)
+                # Show entry cost in the price field for display
+                act["price"] = round(avg_cost, 4)
+                # Reduce tracked position
+                sold_qty = min(act["quantity"], pos["qty"])
                 pos["total_cost"] -= avg_cost * sold_qty
                 pos["qty"] -= sold_qty
 
