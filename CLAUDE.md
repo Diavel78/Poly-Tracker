@@ -5,7 +5,7 @@ Sports betting odds board + Polymarket position tracker. Flask web app deployed 
 ## Architecture
 
 - **Backend**: `app.py` — single-file Flask app, Vercel serverless function
-- **Frontend**: `templates/odds.html` (odds board), `templates/dashboard.html` (P&L tracker), `templates/login.html`
+- **Frontend**: `templates/odds.html` (odds board), `templates/props.html` (player props), `templates/dashboard.html` (P&L tracker), `templates/login.html`
 - **APIs**: Owls Insight (multi-book odds, splits, scores), Polymarket US SDK (positions, P&L)
 - **Deployment**: Vercel via `vercel.json`, env vars in Vercel dashboard
 
@@ -13,6 +13,7 @@ Sports betting odds board + Polymarket position tracker. Flask web app deployed 
 
 - `app.py` — All backend: API clients, data fetching, normalization, routes
 - `templates/odds.html` — Odds board (best lines, splits, movement, live scores, bet indicators)
+- `templates/props.html` — Player props board (best lines across books, game-grouped, expandable detail)
 - `templates/dashboard.html` — Polymarket P&L dashboard (stats, positions, closed trades, bet slip)
 - `templates/login.html` — Login page
 - `.env.example` — Required environment variables
@@ -36,14 +37,17 @@ Sports betting odds board + Polymarket position tracker. Flask web app deployed 
 | Route | Page |
 |---|---|
 | `/` | Odds Board (front page) |
+| `/props` | Player Props Board |
 | `/dashboard` | Polymarket P&L Dashboard |
 | `/login` | Login |
 | `/logout` | Logout |
 | `/api/odds` | Odds + splits + scores JSON |
 | `/api/data` | Dashboard positions/P&L JSON |
+| `/api/props` | Player props JSON (game-grouped, best lines) |
 | `/api/my-bets` | Active Polymarket positions for odds board matching |
 | `/api/odds/raw` | Debug: raw Owls Insight odds response |
 | `/api/splits/raw` | Debug: raw splits response |
+| `/api/props/raw` | Debug: raw props response |
 | `/api/scores/raw` | Debug: raw live scores response |
 | `/api/realtime/raw` | Debug: raw realtime/ps3838 sharp odds |
 | `/api/raw` | Debug: raw Polymarket SDK responses |
@@ -80,6 +84,7 @@ Sports betting odds board + Polymarket position tracker. Flask web app deployed 
 | `GET /api/v1/{sport}/odds` | All odds (spreads, moneylines, totals) from all books |
 | `GET /api/v1/{sport}/splits` | Circa + DK betting splits (handle %, ticket %) |
 | `GET /api/v1/{sport}/scores/live` | Live scores with team names, logos |
+| `GET /api/v1/{sport}/props` | Player props from all books |
 | `GET /api/v1/{sport}/realtime` | Real-time Pinnacle sharp odds (sub-second) |
 | `GET /api/v1/{sport}/ps3838-realtime` | PS3838 (Pinnacle Asia) real-time odds |
 
@@ -162,6 +167,7 @@ Home/away may be swapped between odds and scores feeds — match by team name se
 #### Caching
 - Odds: 10 second TTL server-side (in-memory `_owls_cache`)
 - Splits: 10 second TTL
+- Props: 120 second TTL (2 minutes — lines don't move much)
 - Scores: 30 second TTL
 - My-bets: 60 second TTL
 - **IMPORTANT**: Vercel serverless = in-memory cache resets on cold start. Opening lines tracked in browser localStorage, NOT server memory
@@ -187,6 +193,28 @@ Circa > Pinnacle > Wynn > Westgate. Circa is primary because:
 
 ### Book Sort Order
 Circa first, Pinnacle second, rest alphabetical.
+
+---
+
+## Player Props (`/props`)
+
+### Features
+- **Game-grouped layout**: Props organized by matchup, each game collapsible
+- **Best Line Comparison**: Best over/under price across all enabled books with book attribution
+- **Expandable Detail**: Click any prop row to see all books' lines with deep links
+- **Sport Tabs**: Same as Odds Board (MLB, NBA, NHL, NFL, NCAAB, MMA, Soccer, Tennis)
+- **Search**: Filter by player name or team name (client-side, instant)
+- **Book Selector**: Shared with Odds Board (same localStorage keys)
+- **Auto-refresh**: 120 seconds (prop lines don't move much — saves API budget)
+
+### Caching
+- Props: 120 second TTL server-side (2 minutes)
+- Uses same `_owls_cache` dict as odds/splits
+
+### Props Normalization
+- Handles two API response formats: keyed-by-book (like odds) and flat event list
+- Groups by event -> player -> prop market
+- Market keys mapped to human labels via `_prop_market_label()` (supports MLB, NBA, NHL, NFL, MMA, Tennis, Soccer stats)
 
 ---
 

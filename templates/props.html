@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poly-Tracker — Player Props</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;background:#0d1117;color:#c9d1d9;min-height:100vh}
+
+        /* Nav */
+        .nav{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#161b22;border-bottom:1px solid #30363d}
+        .nav-left{display:flex;align-items:center;gap:20px}
+        .nav h1{font-size:17px;color:#e6edf3}
+        .nav h1 a{color:#e6edf3;text-decoration:none}
+        .nav-links{display:flex;gap:4px}
+        .nav-link{padding:5px 12px;font-size:12px;font-weight:600;color:#8b949e;text-decoration:none;border-radius:6px;transition:all .15s}
+        .nav-link:hover{color:#c9d1d9;background:#21262d}
+        .nav-link.active{color:#fff;background:#1f6feb}
+        .nav-right{display:flex;align-items:center;gap:10px}
+        .status{font-size:11px;color:#8b949e;min-height:16px;white-space:nowrap}
+        .status.loading{color:#d29922}
+        .status.error{color:#f85149}
+        .btn-sm{padding:5px 12px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;font-size:12px;cursor:pointer;text-decoration:none}
+        .btn-sm:hover{background:#30363d}
+
+        /* Sport bar */
+        .sport-bar{display:flex;gap:0;background:#161b22;border-bottom:1px solid #30363d;padding:0 20px;overflow-x:auto}
+        .stab{padding:9px 16px;font-size:12px;font-weight:600;color:#8b949e;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all .15s}
+        .stab:hover{color:#c9d1d9}
+        .stab.active{color:#e6edf3;border-bottom-color:#1f6feb}
+
+        /* Toolbar */
+        .toolbar{display:flex;gap:10px;padding:12px 20px;align-items:center;flex-wrap:wrap;max-width:1400px;margin:0 auto}
+        .search-box{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 12px;color:#c9d1d9;font-size:13px;width:260px;outline:none}
+        .search-box:focus{border-color:#1f6feb}
+        .search-box::placeholder{color:#484f58}
+        .info{font-size:11px;color:#484f58;margin-left:auto;white-space:nowrap}
+
+        /* Books button + dropdown */
+        .books-btn-wrap{position:relative}
+        .books-btn{padding:6px 14px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px}
+        .books-btn:hover{background:#30363d}
+        .books-btn .cnt{background:#1f6feb;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px}
+        .books-panel{display:none;position:absolute;top:100%;left:0;margin-top:6px;background:#161b22;border:1px solid #30363d;border-radius:8px;width:260px;max-height:420px;overflow-y:auto;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+        .books-panel.open{display:block}
+        .books-panel-header{padding:10px 12px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;align-items:center}
+        .books-panel-header span{font-size:12px;font-weight:700;color:#e6edf3}
+        .books-panel-header button{font-size:10px;color:#58a6ff;background:none;border:none;cursor:pointer}
+        .book-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #21262d;cursor:grab;user-select:none;transition:background .1s}
+        .book-item:hover{background:#1c2128}
+        .book-item:last-child{border-bottom:none}
+        .book-item input[type=checkbox]{accent-color:#1f6feb;width:16px;height:16px;cursor:pointer}
+        .book-item .book-label{flex:1;font-size:13px;color:#c9d1d9}
+        .book-item .book-abbr{font-size:10px;color:#484f58;margin-left:4px}
+        .book-item .move-btn{color:#484f58;font-size:16px;background:none;border:none;cursor:pointer;padding:0 3px;line-height:1}
+        .book-item .move-btn:hover{color:#58a6ff}
+        .active-books-summary{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+        .abs-chip{font-size:10px;font-weight:600;color:#8b949e;background:#21262d;padding:2px 6px;border-radius:4px}
+
+        /* Board */
+        .board{max-width:1400px;margin:0 auto;padding:8px 20px 40px}
+
+        /* Game card */
+        .game{background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:10px;overflow:hidden}
+        .game-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;user-select:none;border-bottom:1px solid #21262d;transition:background .1s}
+        .game-header:hover{background:#1c2128}
+        .game-header .teams{font-size:14px;font-weight:600;color:#e6edf3}
+        .game-header .meta{font-size:11px;color:#8b949e}
+        .game-header .toggle{color:#484f58;font-size:14px;transition:transform .2s}
+        .game-header .toggle.open{transform:rotate(180deg)}
+
+        /* Props table */
+        .props-body{display:none}
+        .props-body.open{display:block}
+        .ptable{width:100%;border-collapse:collapse}
+        .ptable th{background:#0d1117;padding:6px 12px;font-size:11px;font-weight:600;color:#8b949e;text-align:left;border-bottom:1px solid #21262d;position:sticky;top:0}
+        .ptable th.center{text-align:center}
+        .ptable td{padding:6px 12px;font-size:13px;border-bottom:1px solid #21262d;vertical-align:middle}
+        .ptable tr:hover{background:#1c2128}
+        .player-name{font-weight:600;color:#e6edf3;white-space:nowrap}
+        .prop-label{color:#8b949e;font-size:12px}
+        .prop-point{color:#c9d1d9;font-weight:600;font-size:13px}
+        .best-price{font-weight:700;font-size:14px;text-align:center}
+        .best-price.pos{color:#3fb950}
+        .best-price.neg{color:#c9d1d9}
+        .best-price.na{color:#484f58}
+        .best-book{display:block;font-size:9px;font-weight:600;color:#1f6feb;margin-top:1px;text-align:center}
+
+        /* Expanded row — all books */
+        .books-detail{display:none;background:#0d1117}
+        .books-detail.open{display:table-row}
+        .books-detail td{padding:8px 12px;border-bottom:1px solid #21262d}
+        .books-grid{display:flex;gap:12px;flex-wrap:wrap}
+        .book-chip{display:inline-flex;flex-direction:column;align-items:center;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;min-width:70px;font-size:12px}
+        .book-chip .bname{font-size:10px;font-weight:600;color:#8b949e;margin-bottom:3px}
+        .book-chip .bover{color:#3fb950;font-weight:600}
+        .book-chip .bunder{color:#f85149;font-weight:600}
+        .book-chip .bna{color:#484f58}
+        .book-chip a{color:inherit;text-decoration:none}
+        .book-chip a:hover{text-decoration:underline}
+
+        .empty-state{text-align:center;padding:60px 24px;color:#484f58;font-size:14px}
+        .spinner{display:inline-block;width:14px;height:14px;border:2px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+
+        @media(max-width:768px){
+            .nav{padding:10px 12px}
+            .nav h1{font-size:15px}
+            .toolbar{padding:8px 12px}
+            .search-box{width:180px}
+            .board{padding:6px 12px 40px}
+            .ptable th,.ptable td{padding:4px 8px;font-size:12px}
+            .best-price{font-size:12px}
+            .books-grid{gap:6px}
+            .book-chip{min-width:56px;padding:4px 6px}
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-left">
+            <h1><a href="/">Poly-Tracker</a></h1>
+            <div class="nav-links">
+                <a href="/" class="nav-link">Odds</a>
+                <a href="/props" class="nav-link active">Props</a>
+                <a href="/dashboard" class="nav-link">Dashboard</a>
+            </div>
+        </div>
+        <div class="nav-right">
+            <span class="status" id="status">Loading...</span>
+            <a href="/logout" class="btn-sm">Logout</a>
+        </div>
+    </nav>
+
+    <div class="sport-bar" id="sport-bar"></div>
+
+    <div class="toolbar">
+        <input class="search-box" id="search" type="text" placeholder="Search player or team..." oninput="renderBoard()">
+        <div class="books-btn-wrap">
+            <button class="books-btn" onclick="toggleBooksPanel()">
+                Books <span class="cnt" id="books-cnt">0</span> &#9662;
+            </button>
+            <div class="books-panel" id="books-panel">
+                <div class="books-panel-header">
+                    <span>Sportsbooks</span>
+                    <button onclick="selectAllBooks()">All</button>
+                    <button onclick="selectNoBooks()">None</button>
+                </div>
+                <div id="books-list"></div>
+            </div>
+        </div>
+        <div class="active-books-summary" id="books-summary"></div>
+        <span class="info" id="info"></span>
+    </div>
+
+    <div class="board" id="board">
+        <div class="empty-state"><span class="spinner"></span> Loading props...</div>
+    </div>
+
+    <script>
+    const $ = id => document.getElementById(id);
+    const SPORTS = ['mlb','nba','nhl','nfl','ncaab','mma','soccer','tennis'];
+    const SL = {mlb:'MLB',nba:'NBA',nhl:'NHL',nfl:'NFL',ncaab:'NCAAB',ncaaf:'NCAAF',mma:'MMA',soccer:'Soccer',tennis:'Tennis'};
+    const BL = {pinnacle:'PIN',fanduel:'FD',draftkings:'DK',betmgm:'MGM',caesars:'CZR',bet365:'365',polymarket:'POLY',kalshi:'KAL',novig:'NOV','1xbet':'1X',betonline:'BOL',circa:'CIR',south_point:'SP',westgate:'WG',wynn:'WYN',stations:'STN',hardrock:'HR'};
+    const BL_FULL = {pinnacle:'Pinnacle',fanduel:'FanDuel',draftkings:'DraftKings',betmgm:'BetMGM',caesars:'Caesars',bet365:'Bet365',polymarket:'Polymarket',kalshi:'Kalshi',novig:'Novig','1xbet':'1xBet',betonline:'BetOnline',circa:'Circa',south_point:'South Point',westgate:'Westgate',wynn:'Wynn',stations:'Stations',hardrock:'Hard Rock'};
+
+    let activeSport = localStorage.getItem('props_sport') || 'mlb';
+    let propsData = {games:[], books:[]};
+    const DEFAULT_BOOKS = ['fanduel','draftkings','betmgm','pinnacle','caesars'];
+    // Share book prefs with odds board
+    let enabledBooks = new Set(JSON.parse(localStorage.getItem('odds_books') || 'null') || DEFAULT_BOOKS);
+    let bookOrder = JSON.parse(localStorage.getItem('odds_book_order') || 'null') || [];
+    let expandedGames = new Set(); // track which games are expanded
+
+    function esc(s){if(!s)return '';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+    function fmt(p){if(p==null)return '--';return p>0?'+'+p:''+p}
+    function priceCls(p){if(p==null)return 'na';return p>0?'pos':'neg'}
+
+    // --- Sport bar ---
+    function renderSportBar(){
+        let h='';
+        for(const s of SPORTS) h+=`<div class="stab ${s===activeSport?'active':''}" onclick="setSport('${s}')">${SL[s]||s.toUpperCase()}</div>`;
+        $('sport-bar').innerHTML=h;
+    }
+
+    function setSport(s){
+        activeSport=s;
+        localStorage.setItem('props_sport',s);
+        renderSportBar();
+        loadProps(true);
+    }
+
+    // --- Books management (synced with odds board localStorage) ---
+    function saveBookPrefs(){
+        localStorage.setItem('odds_books', JSON.stringify([...enabledBooks]));
+        localStorage.setItem('odds_book_order', JSON.stringify(bookOrder));
+    }
+
+    function getOrderedBooks(){
+        const available = allBooksFromData();
+        const ordered = [];
+        for(const b of bookOrder) { if(available.includes(b)) ordered.push(b); }
+        for(const b of available) { if(!ordered.includes(b)) ordered.push(b); }
+        bookOrder = ordered;
+        return ordered;
+    }
+
+    function allBooksFromData(){
+        const s = new Set();
+        for(const g of (propsData.games||[])){
+            for(const [pn, pd] of Object.entries(g.players||{})){
+                for(const [pk, prop] of Object.entries(pd.props||{})){
+                    for(const bk of Object.keys(prop.books||{})) s.add(bk);
+                }
+            }
+        }
+        return [...s].sort((a,b)=>(a==='circa'?-1:b==='circa'?1:a==='pinnacle'?-1:b==='pinnacle'?1:a.localeCompare(b)));
+    }
+
+    function getBooks(){
+        return getOrderedBooks().filter(b=>enabledBooks.has(b));
+    }
+
+    function renderBookPills(){
+        const ordered = getOrderedBooks();
+        const enabled = getBooks();
+        $('books-cnt').textContent = enabled.length;
+        let sh='';
+        for(const b of enabled) sh+=`<span class="abs-chip">${esc(BL[b]||b)}</span>`;
+        $('books-summary').innerHTML=sh;
+        let h='';
+        for(let i=0;i<ordered.length;i++){
+            const b = ordered[i];
+            const on = enabledBooks.has(b);
+            const full = BL_FULL[b]||b;
+            const abbr = BL[b]||b;
+            h+=`<div class="book-item" data-book="${b}">`;
+            h+=`<button class="move-btn" onclick="moveBook('${b}',-1)" ${i===0?'disabled':''}>&#9650;</button>`;
+            h+=`<button class="move-btn" onclick="moveBook('${b}',1)" ${i===ordered.length-1?'disabled':''}>&#9660;</button>`;
+            h+=`<input type="checkbox" ${on?'checked':''} onchange="toggleBook('${b}')">`;
+            h+=`<span class="book-label">${esc(full)}<span class="book-abbr">${esc(abbr)}</span></span>`;
+            h+=`</div>`;
+        }
+        $('books-list').innerHTML=h;
+    }
+
+    function toggleBook(b){
+        if(enabledBooks.has(b)) enabledBooks.delete(b); else enabledBooks.add(b);
+        saveBookPrefs(); renderBookPills(); renderBoard();
+    }
+    function selectAllBooks(){
+        enabledBooks = new Set(getOrderedBooks());
+        saveBookPrefs(); renderBookPills(); renderBoard();
+    }
+    function selectNoBooks(){
+        enabledBooks = new Set();
+        saveBookPrefs(); renderBookPills(); renderBoard();
+    }
+    function moveBook(b, dir){
+        const i = bookOrder.indexOf(b);
+        if(i<0) return;
+        const ni = i+dir;
+        if(ni<0||ni>=bookOrder.length) return;
+        bookOrder.splice(i,1);
+        bookOrder.splice(ni,0,b);
+        saveBookPrefs(); renderBookPills(); renderBoard();
+    }
+
+    let booksPanelOpen = false;
+    function toggleBooksPanel(){
+        booksPanelOpen = !booksPanelOpen;
+        $('books-panel').classList.toggle('open', booksPanelOpen);
+    }
+    document.addEventListener('click', e=>{
+        if(booksPanelOpen && !e.target.closest('.books-btn-wrap')){
+            booksPanelOpen=false;
+            $('books-panel').classList.remove('open');
+        }
+    });
+
+    // --- Best line finder ---
+    function findBestLine(prop, side, books){
+        // side = 'over' or 'under'
+        // Returns { price, book } with the best (highest) price across enabled books
+        let best = null;
+        for(const bk of books){
+            const bd = (prop.books||{})[bk];
+            if(!bd) continue;
+            const p = bd[side];
+            if(p==null) continue;
+            if(!best || p > best.price){
+                best = {price: p, book: bk};
+            }
+        }
+        return best;
+    }
+
+    // --- Game toggle ---
+    function toggleGame(eid){
+        if(expandedGames.has(eid)){
+            expandedGames.delete(eid);
+        } else {
+            expandedGames.add(eid);
+        }
+        renderBoard();
+    }
+
+    // --- Toggle detail row ---
+    function toggleDetail(rowId){
+        const el = document.getElementById(rowId);
+        if(el) el.classList.toggle('open');
+    }
+
+    // --- Date/time formatting ---
+    function fmtDateTime(iso){
+        if(!iso) return '';
+        const d = new Date(iso);
+        const opts = {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'};
+        return d.toLocaleDateString('en-US', opts);
+    }
+
+    // --- Render board ---
+    function renderBoard(){
+        const games = propsData.games || [];
+        const books = getBooks();
+        const query = ($('search').value||'').toLowerCase().trim();
+
+        if(!games.length){
+            $('board').innerHTML = '<div class="empty-state">No player props available for this sport.</div>';
+            return;
+        }
+
+        let html = '';
+        let gameCount = 0;
+        let propCount = 0;
+
+        for(const game of games){
+            const away = game.away_team || '';
+            const home = game.home_team || '';
+            const players = game.players || {};
+
+            // Filter by search query (match player name or team name)
+            let filteredPlayers = {};
+            for(const [pn, pd] of Object.entries(players)){
+                if(query){
+                    const haystack = `${pn} ${away} ${home}`.toLowerCase();
+                    if(!haystack.includes(query)) continue;
+                }
+                // Only include props that have at least one enabled book
+                const filteredProps = {};
+                for(const [pk, prop] of Object.entries(pd.props||{})){
+                    const hasEnabledBook = books.some(b => (prop.books||{})[b]);
+                    if(hasEnabledBook) filteredProps[pk] = prop;
+                }
+                if(Object.keys(filteredProps).length > 0){
+                    filteredPlayers[pn] = {props: filteredProps};
+                }
+            }
+
+            if(Object.keys(filteredPlayers).length === 0) continue;
+
+            gameCount++;
+            const eid = game.event_id || `${away}-${home}`;
+            const isOpen = expandedGames.has(eid);
+
+            html += `<div class="game">`;
+            html += `<div class="game-header" onclick="toggleGame('${esc(eid)}')">`;
+            html += `<div><span class="teams">${esc(away)} @ ${esc(home)}</span></div>`;
+            html += `<div style="display:flex;align-items:center;gap:12px">`;
+            html += `<span class="meta">${fmtDateTime(game.commence_time)}</span>`;
+            html += `<span class="toggle ${isOpen?'open':''}">&#9660;</span>`;
+            html += `</div>`;
+            html += `</div>`;
+
+            html += `<div class="props-body ${isOpen?'open':''}">`;
+            html += `<table class="ptable">`;
+            html += `<thead><tr>`;
+            html += `<th>Player</th><th>Prop</th><th class="center">Line</th>`;
+            html += `<th class="center">Best Over</th><th class="center">Best Under</th>`;
+            html += `</tr></thead><tbody>`;
+
+            // Sort players alphabetically
+            const sortedPlayers = Object.entries(filteredPlayers).sort((a,b)=>a[0].localeCompare(b[0]));
+
+            for(const [playerName, pd] of sortedPlayers){
+                // Sort props by label
+                const sortedProps = Object.entries(pd.props).sort((a,b)=>(a[1].label||'').localeCompare(b[1].label||''));
+                let firstProp = true;
+
+                for(const [propKey, prop] of sortedProps){
+                    propCount++;
+                    const rowId = `detail-${eid}-${propKey}-${playerName}`.replace(/[^a-zA-Z0-9-]/g,'_');
+                    const bestOver = findBestLine(prop, 'over', books);
+                    const bestUnder = findBestLine(prop, 'under', books);
+                    const point = prop.point != null ? prop.point : '';
+
+                    html += `<tr style="cursor:pointer" onclick="toggleDetail('${rowId}')">`;
+                    if(firstProp){
+                        html += `<td class="player-name" rowspan="${sortedProps.length}">${esc(playerName)}</td>`;
+                        firstProp = false;
+                    }
+                    html += `<td class="prop-label">${esc(prop.label||propKey)}</td>`;
+                    html += `<td class="prop-point" style="text-align:center">${point !== '' ? point : '--'}</td>`;
+
+                    // Best Over
+                    if(bestOver){
+                        html += `<td class="best-price ${priceCls(bestOver.price)}">${fmt(bestOver.price)}<span class="best-book">${esc(BL[bestOver.book]||bestOver.book)}</span></td>`;
+                    } else {
+                        html += `<td class="best-price na">--</td>`;
+                    }
+
+                    // Best Under
+                    if(bestUnder){
+                        html += `<td class="best-price ${priceCls(bestUnder.price)}">${fmt(bestUnder.price)}<span class="best-book">${esc(BL[bestUnder.book]||bestUnder.book)}</span></td>`;
+                    } else {
+                        html += `<td class="best-price na">--</td>`;
+                    }
+
+                    html += `</tr>`;
+
+                    // Detail row (all books)
+                    html += `<tr class="books-detail" id="${rowId}"><td colspan="5">`;
+                    html += `<div class="books-grid">`;
+                    for(const bk of books){
+                        const bd = (prop.books||{})[bk];
+                        if(!bd) continue;
+                        const link = bd.link;
+                        const bookName = BL[bk]||bk;
+                        html += `<div class="book-chip">`;
+                        html += `<span class="bname">${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(bookName)}</a>` : esc(bookName)}</span>`;
+                        html += `<span class="bover">${bd.over!=null?'O '+fmt(bd.over):'<span class="bna">--</span>'}</span>`;
+                        html += `<span class="bunder">${bd.under!=null?'U '+fmt(bd.under):'<span class="bna">--</span>'}</span>`;
+                        if(bd.point!=null) html += `<span style="font-size:10px;color:#484f58">${bd.point}</span>`;
+                        html += `</div>`;
+                    }
+                    html += `</div></td></tr>`;
+                }
+            }
+
+            html += `</tbody></table></div></div>`;
+        }
+
+        if(!html){
+            html = '<div class="empty-state">No props match your search or enabled books.</div>';
+        }
+
+        $('board').innerHTML = html;
+        $('info').textContent = `${gameCount} game${gameCount!==1?'s':''} \u00b7 ${propCount} props`;
+    }
+
+    // --- Data loading ---
+    let firstLoad = true;
+    async function loadProps(showLoading){
+        if(showLoading && firstLoad){
+            $('board').innerHTML = '<div class="empty-state"><span class="spinner"></span> Loading props...</div>';
+        }
+        const st = $('status');
+        st.textContent = 'Refreshing...';
+        st.className = 'status loading';
+
+        try{
+            const books = getBooks().join(',');
+            const resp = await fetch(`/api/props?sport=${activeSport}`);
+            if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            if(!data.ok) throw new Error(data.error||'API error');
+
+            propsData = data;
+            renderBookPills();
+            renderBoard();
+
+            const now = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'});
+            st.textContent = `${data.cached?'(cached) ':''}${now}`;
+            st.className = 'status';
+            firstLoad = false;
+
+            if(data.errors && data.errors.length){
+                console.warn('Props errors:', data.errors);
+            }
+        } catch(err){
+            const st = $('status');
+            st.textContent = err.message;
+            st.className = 'status error';
+            console.error('Props load error:', err);
+        }
+    }
+
+    // --- Init ---
+    renderSportBar();
+    loadProps(true);
+    setInterval(loadProps, 120000); // 2 minute refresh — prop lines don't move much
+    </script>
+</body>
+</html>
